@@ -76,7 +76,7 @@ export default class LinkScraperPlugin extends Plugin {
 
 			menu.addItem((item) =>
 				item
-					.setTitle("Settings")
+					.setTitle("Open settings")
 					.setIcon("settings")
 					.onClick(() => {
 						// @ts-ignore
@@ -104,7 +104,7 @@ export default class LinkScraperPlugin extends Plugin {
 									return;
 								}
 								const urls = [...new Set(links.map((l) => l.url))];
-								new Notice(`Found ${urls.length} links. Scraping...`);
+								new Notice(`Found ${urls.length} links, scraping...`);
 								await this.scrapeUrls(urls, file.path);
 							});
 					});
@@ -193,8 +193,8 @@ export default class LinkScraperPlugin extends Plugin {
 		// Remove markdown links to avoid duplicates
 		const textWithoutMd = text.replace(mdLinkRegex, "");
 
-		// Raw URLs
-		const rawUrlRegex = /(https?:\/\/[^\s<>\[\]()"'`]+)/g;
+		// Raw URLs - note: [ doesn't need escaping inside character class
+		const rawUrlRegex = /(https?:\/\/[^\s<>[\]()"'`]+)/g;
 		while ((match = rawUrlRegex.exec(textWithoutMd)) !== null) {
 			const url = match[1].replace(/[.,;:]+$/, ""); // remove trailing punctuation
 			if (!urls.includes(url)) {
@@ -257,7 +257,7 @@ export default class LinkScraperPlugin extends Plugin {
 		}
 
 		const urls = [...new Set(links.map((l) => l.url))];
-		new Notice(`Found ${urls.length} links. Scraping...`);
+		new Notice(`Found ${urls.length} links, scraping...`);
 
 		await this.scrapeUrls(urls, activeFile.path);
 	}
@@ -516,9 +516,10 @@ source_notes: ${JSON.stringify(sources)}
 		// Add backlink after URL
 		let newContent = content;
 
-		// For markdown links
+		// For markdown links - build pattern without unnecessary escapes
+		const escapedUrl = this.escapeRegex(url);
 		const mdPattern = new RegExp(
-			"(\\[[^\\]]*\\]\\(" + this.escapeRegex(url) + "\\))",
+			"(\\[[^\\]]*\\]\\(" + escapedUrl + "\\))",
 			"g"
 		);
 		newContent = newContent.replace(mdPattern, `$1${backlink}`);
@@ -574,7 +575,7 @@ source_notes: ${JSON.stringify(sources)}
 		}
 
 		notice.hide();
-		new Notice(`Scraped: ${success}, Skipped: ${skipped}, Failed: ${failed}`);
+		new Notice(`Done: ${success} scraped, ${skipped} skipped, ${failed} failed`);
 	}
 
 	// Scrape all links from vault
@@ -651,8 +652,8 @@ class ScraperModal extends Modal {
 		contentEl.empty();
 		contentEl.addClass("link-scraper-modal");
 
-		// Title
-		new Setting(contentEl).setName("Link Scraper").setHeading();
+		// Title - use descriptive heading without plugin name
+		new Setting(contentEl).setName("Scrape all links").setHeading();
 
 		// Status
 		this.statusEl = contentEl.createEl("p", {
@@ -677,7 +678,9 @@ class ScraperModal extends Modal {
 			text: "Start",
 			cls: "mod-cta"
 		});
-		this.startBtn.addEventListener("click", () => this.startScraping());
+		this.startBtn.addEventListener("click", () => {
+			void this.startScraping();
+		});
 
 		const cancelBtn = buttonContainer.createEl("button", { text: "Close" });
 		cancelBtn.addEventListener("click", () => this.close());
@@ -701,25 +704,25 @@ class ScraperModal extends Modal {
 			return;
 		}
 
-		this.statusEl.setText(`Found ${totalLinks} unique links. Scraping...`);
+		this.statusEl.setText(`Found ${totalLinks} unique links, scraping...`);
 
 		const result = await this.plugin.scrapeAllLinks(
 			allLinks,
 			(current, total, domain, status) => {
 				const percent = Math.round((current / total) * 100);
-				const statusIcon = status === "skipped" ? "Skipped" : "Processing";
+				const statusLabel = status === "skipped" ? "Skipped" : "Processing";
 				
 				this.progressText.setText(`${current}/${total} (${percent}%)`);
 				this.progressBarFill.style.width = `${percent}%`;
-				this.progressStatus.setText(`${statusIcon}: ${domain}`);
+				this.progressStatus.setText(`${statusLabel}: ${domain}`);
 			}
 		);
 
 		this.statusEl.setText(
-			`Done! Scraped: ${result.success}, Skipped: ${result.skipped}, Failed: ${result.failed}`
+			`Done: ${result.success} scraped, ${result.skipped} skipped, ${result.failed} failed`
 		);
 		
-		this.progressText.setText("Complete!");
+		this.progressText.setText("Complete");
 		this.progressStatus.setText(`Files saved in: ${this.plugin.settings.outputFolder}/`);
 
 		this.isRunning = false;
@@ -745,8 +748,6 @@ class LinkScraperSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-
-		new Setting(containerEl).setName("Link Scraper settings").setHeading();
 
 		new Setting(containerEl)
 			.setName("Output folder")
