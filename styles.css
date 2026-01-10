@@ -1,0 +1,26 @@
+/* Link Scraper Plugin Styles */
+
+.link-scraper-progress {
+    margin: 20px 0;
+    padding: 15px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+}
+
+.link-scraper-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.link-scraper-buttons button {
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.link-scraper-buttons button:hover {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}

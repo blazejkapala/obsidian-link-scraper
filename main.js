@@ -1,0 +1,503 @@
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// main.ts
+var main_exports = {};
+__export(main_exports, {
+  default: () => LinkScraperPlugin
+});
+module.exports = __toCommonJS(main_exports);
+var import_obsidian = require("obsidian");
+var DEFAULT_SETTINGS = {
+  outputFolder: "scraped-links",
+  maxConcurrent: 3,
+  timeout: 2e4,
+  addBacklinks: true,
+  skipDomains: "youtube.com, youtu.be, twitter.com, x.com, facebook.com"
+};
+var LinkScraperPlugin = class extends import_obsidian.Plugin {
+  async onload() {
+    await this.loadSettings();
+    this.addRibbonIcon("link", "Link Scraper", () => {
+      new ScraperModal(this.app, this).open();
+    });
+    this.addCommand({
+      id: "scrape-current-note",
+      name: "Scrape links from current note",
+      callback: () => this.scrapeCurrentNote()
+    });
+    this.addCommand({
+      id: "scrape-all-links",
+      name: "Scrape all links from vault",
+      callback: () => {
+        new ScraperModal(this.app, this).open();
+      }
+    });
+    this.addCommand({
+      id: "scrape-link-under-cursor",
+      name: "Scrape link under cursor",
+      editorCallback: (editor) => {
+        var _a;
+        const cursor = editor.getCursor();
+        const line = editor.getLine(cursor.line);
+        const urls = this.extractUrlsFromText(line);
+        if (urls.length > 0) {
+          this.scrapeUrls(urls, ((_a = this.app.workspace.getActiveFile()) == null ? void 0 : _a.path) || "");
+        } else {
+          new import_obsidian.Notice("No link found in this line");
+        }
+      }
+    });
+    this.addSettingTab(new LinkScraperSettingTab(this.app, this));
+  }
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
+  // Extract URLs from text
+  extractUrlsFromText(text) {
+    const urls = [];
+    const mdLinkRegex = /\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g;
+    let match;
+    while ((match = mdLinkRegex.exec(text)) !== null) {
+      urls.push(match[2]);
+    }
+    const textWithoutMd = text.replace(mdLinkRegex, "");
+    const rawUrlRegex = /(https?:\/\/[^\s<>\[\]()\"\'`]+)/g;
+    while ((match = rawUrlRegex.exec(textWithoutMd)) !== null) {
+      let url = match[1].replace(/[.,;:]+$/, "");
+      if (!urls.includes(url)) {
+        urls.push(url);
+      }
+    }
+    return urls;
+  }
+  // Extract links from file
+  async extractLinksFromFile(file) {
+    const links = [];
+    const content = await this.app.vault.read(file);
+    const urls = this.extractUrlsFromText(content);
+    for (const url of urls) {
+      links.push({
+        url,
+        sourceFile: file.path
+      });
+    }
+    return links;
+  }
+  // Scan entire vault
+  async scanVaultForLinks() {
+    const allLinks = /* @__PURE__ */ new Map();
+    const files = this.app.vault.getMarkdownFiles();
+    for (const file of files) {
+      if (file.path.startsWith(this.settings.outputFolder))
+        continue;
+      const links = await this.extractLinksFromFile(file);
+      for (const link of links) {
+        if (!allLinks.has(link.url)) {
+          allLinks.set(link.url, []);
+        }
+        allLinks.get(link.url).push(link);
+      }
+    }
+    return allLinks;
+  }
+  // Scrape current note
+  async scrapeCurrentNote() {
+    const activeFile = this.app.workspace.getActiveFile();
+    if (!activeFile) {
+      new import_obsidian.Notice("No active note");
+      return;
+    }
+    const links = await this.extractLinksFromFile(activeFile);
+    if (links.length === 0) {
+      new import_obsidian.Notice("No links found in this note");
+      return;
+    }
+    const urls = [...new Set(links.map((l) => l.url))];
+    new import_obsidian.Notice(`Found ${urls.length} links. Scraping...`);
+    await this.scrapeUrls(urls, activeFile.path);
+  }
+  // Check if domain should be skipped
+  shouldSkipDomain(url) {
+    try {
+      const domain = new URL(url).hostname;
+      const skipList = this.settings.skipDomains.split(",").map((d) => d.trim().toLowerCase());
+      return skipList.some((skip) => domain.includes(skip));
+    } catch (e) {
+      return false;
+    }
+  }
+  // Scrape single URL
+  async scrapeUrl(url) {
+    var _a;
+    const domain = new URL(url).hostname;
+    if (this.shouldSkipDomain(url)) {
+      return {
+        url,
+        title: "",
+        description: "",
+        content: "",
+        domain,
+        success: false,
+        error: "Domain on skip list"
+      };
+    }
+    try {
+      const response = await (0, import_obsidian.requestUrl)({
+        url,
+        method: "GET",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }
+      });
+      if (response.status !== 200) {
+        return {
+          url,
+          title: "",
+          description: "",
+          content: "",
+          domain,
+          success: false,
+          error: `HTTP ${response.status}`
+        };
+      }
+      const html = response.text;
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+      let title = ((_a = doc.querySelector("title")) == null ? void 0 : _a.textContent) || "";
+      if (!title) {
+        const ogTitle = doc.querySelector('meta[property="og:title"]');
+        title = (ogTitle == null ? void 0 : ogTitle.getAttribute("content")) || "";
+      }
+      let description = "";
+      const metaDesc = doc.querySelector('meta[name="description"]');
+      if (metaDesc) {
+        description = metaDesc.getAttribute("content") || "";
+      }
+      if (!description) {
+        const ogDesc = doc.querySelector('meta[property="og:description"]');
+        description = (ogDesc == null ? void 0 : ogDesc.getAttribute("content")) || "";
+      }
+      const elementsToRemove = doc.querySelectorAll(
+        "script, style, nav, footer, header, aside, noscript, iframe, svg"
+      );
+      elementsToRemove.forEach((el) => el.remove());
+      let mainElement = doc.querySelector("main") || doc.querySelector("article") || doc.querySelector('[class*="content"]') || doc.querySelector('[id*="content"]') || doc.body;
+      let content = "";
+      if (mainElement) {
+        content = mainElement.textContent || "";
+        content = content.split("\n").map((line) => line.trim()).filter((line) => line.length > 2).slice(0, 150).join("\n\n");
+        if (content.length > 15e3) {
+          content = content.substring(0, 15e3) + "\n\n[... content truncated ...]";
+        }
+      }
+      return {
+        url,
+        title: title.trim(),
+        description: description.trim(),
+        content,
+        domain,
+        success: true
+      };
+    } catch (e) {
+      return {
+        url,
+        title: "",
+        description: "",
+        content: "",
+        domain,
+        success: false,
+        error: String(e).substring(0, 200)
+      };
+    }
+  }
+  // Generate safe filename
+  sanitizeFilename(name) {
+    return name.replace(/[<>:\"\/\\|?*]/g, "_").replace(/\s+/g, " ").trim().substring(0, 80);
+  }
+  // Hash URL
+  hashUrl(url) {
+    let hash = 0;
+    for (let i = 0; i < url.length; i++) {
+      const char = url.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash).toString(16).substring(0, 8);
+  }
+  // Save scraped content
+  async saveScrapedContent(content, sourceFiles) {
+    const outputFolder = this.settings.outputFolder;
+    if (!await this.app.vault.adapter.exists(outputFolder)) {
+      await this.app.vault.createFolder(outputFolder);
+    }
+    let filename;
+    if (content.title) {
+      filename = this.sanitizeFilename(content.title);
+    } else {
+      filename = this.sanitizeFilename(content.domain + "_" + this.hashUrl(content.url));
+    }
+    filename = `${filename}_${this.hashUrl(content.url)}.md`;
+    const filePath = `${outputFolder}/${filename}`;
+    const sources = [...new Set(sourceFiles.map((f) => `[[${f.replace(".md", "")}]]`))];
+    const titleSafe = (content.title || content.url).replace(/\"/g, "'");
+    let mdContent = `---
+url: "${content.url}"
+title: "${titleSafe}"
+domain: "${content.domain}"
+scraped_at: "${(/* @__PURE__ */ new Date()).toISOString()}"
+success: ${content.success}
+source_notes: ${JSON.stringify(sources)}
+---
+
+# ${content.title || content.url}
+
+> **Source:** ${content.url}
+> **Scraped:** ${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}
+> **Linked from:** ${sources.join(", ")}
+
+`;
+    if (content.success) {
+      if (content.description) {
+        mdContent += `## Description
+
+${content.description}
+
+`;
+      }
+      if (content.content) {
+        mdContent += `## Content
+
+${content.content}
+`;
+      } else {
+        mdContent += `## Content
+
+*Page has no text content (may use JavaScript)*
+`;
+      }
+    } else {
+      mdContent += `## Scraping Error
+
+\u26A0\uFE0F Failed to scrape: **${content.error}**
+`;
+    }
+    const existingFile = this.app.vault.getAbstractFileByPath(filePath);
+    if (existingFile instanceof import_obsidian.TFile) {
+      await this.app.vault.modify(existingFile, mdContent);
+    } else {
+      await this.app.vault.create(filePath, mdContent);
+    }
+    return filePath;
+  }
+  // Add backlink to note
+  async addBacklinkToNote(notePath, scrapedPath, url) {
+    if (!this.settings.addBacklinks)
+      return;
+    const file = this.app.vault.getAbstractFileByPath(notePath);
+    if (!(file instanceof import_obsidian.TFile))
+      return;
+    const content = await this.app.vault.read(file);
+    const scrapedName = scrapedPath.replace(".md", "").split("/").pop();
+    const backlink = ` [[${scrapedPath.replace(".md", "")}|\u{1F4E5}]]`;
+    if (content.includes(scrapedName))
+      return;
+    let newContent = content;
+    const mdPattern = new RegExp(
+      `(\\[[^\\]]*\\]\\(${this.escapeRegex(url)}\\))`,
+      "g"
+    );
+    newContent = newContent.replace(mdPattern, `$1${backlink}`);
+    if (newContent === content) {
+      newContent = content.replace(url, `${url}${backlink}`);
+    }
+    if (newContent !== content) {
+      await this.app.vault.modify(file, newContent);
+    }
+  }
+  escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  // Main scraping function
+  async scrapeUrls(urls, sourceFile) {
+    const notice = new import_obsidian.Notice(`Scraping ${urls.length} links...`, 0);
+    let success = 0;
+    let failed = 0;
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
+      notice.setMessage(`Scraping ${i + 1}/${urls.length}: ${new URL(url).hostname}`);
+      const content = await this.scrapeUrl(url);
+      if (content.success) {
+        success++;
+      } else {
+        failed++;
+      }
+      const savedPath = await this.saveScrapedContent(content, [sourceFile]);
+      if (savedPath && content.success) {
+        await this.addBacklinkToNote(sourceFile, savedPath, url);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    notice.hide();
+    new import_obsidian.Notice(`\u2705 Scraped: ${success}, \u274C Failed: ${failed}`);
+  }
+  // Scrape all links from vault
+  async scrapeAllLinks(allLinks, progressCallback) {
+    const urls = Array.from(allLinks.keys());
+    let success = 0;
+    let failed = 0;
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
+      const domain = new URL(url).hostname;
+      if (progressCallback) {
+        progressCallback(i + 1, urls.length, domain);
+      }
+      const content = await this.scrapeUrl(url);
+      if (content.success) {
+        success++;
+      } else {
+        failed++;
+      }
+      const sourceFiles = allLinks.get(url).map((l) => l.sourceFile);
+      const savedPath = await this.saveScrapedContent(content, sourceFiles);
+      if (savedPath && this.settings.addBacklinks) {
+        for (const link of allLinks.get(url)) {
+          await this.addBacklinkToNote(link.sourceFile, savedPath, url);
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    return { success, failed };
+  }
+};
+var ScraperModal = class extends import_obsidian.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.isRunning = false;
+    this.plugin = plugin;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "\u{1F517} Link Scraper" });
+    this.statusEl = contentEl.createEl("p", {
+      text: "Click Start to scan the vault and scrape all links."
+    });
+    this.progressEl = contentEl.createEl("div", { cls: "link-scraper-progress" });
+    this.progressEl.style.cssText = "margin: 20px 0; padding: 10px; background: var(--background-secondary); border-radius: 5px; display: none;";
+    const buttonContainer = contentEl.createEl("div", {
+      cls: "link-scraper-buttons"
+    });
+    buttonContainer.style.cssText = "display: flex; gap: 10px; margin-top: 20px;";
+    this.startBtn = buttonContainer.createEl("button", { text: "\u25B6\uFE0F Start" });
+    this.startBtn.style.cssText = "padding: 10px 20px; cursor: pointer;";
+    this.startBtn.onclick = () => this.startScraping();
+    const cancelBtn = buttonContainer.createEl("button", { text: "\u274C Close" });
+    cancelBtn.style.cssText = "padding: 10px 20px; cursor: pointer;";
+    cancelBtn.onclick = () => this.close();
+  }
+  async startScraping() {
+    if (this.isRunning)
+      return;
+    this.isRunning = true;
+    this.startBtn.disabled = true;
+    this.statusEl.setText("\u{1F4C2} Scanning vault...");
+    this.progressEl.style.display = "block";
+    const allLinks = await this.plugin.scanVaultForLinks();
+    const totalLinks = allLinks.size;
+    if (totalLinks === 0) {
+      this.statusEl.setText("No links found in the vault.");
+      this.isRunning = false;
+      this.startBtn.disabled = false;
+      return;
+    }
+    this.statusEl.setText(`Found ${totalLinks} unique links. Scraping...`);
+    const result = await this.plugin.scrapeAllLinks(
+      allLinks,
+      (current, total, domain) => {
+        const percent = Math.round(current / total * 100);
+        this.progressEl.innerHTML = `
+					<div style="margin-bottom: 5px;">
+						<strong>${current}/${total}</strong> (${percent}%)
+					</div>
+					<div style="background: var(--background-modifier-border); border-radius: 3px; height: 20px; overflow: hidden;">
+						<div style="background: var(--interactive-accent); height: 100%; width: ${percent}%; transition: width 0.3s;"></div>
+					</div>
+					<div style="margin-top: 5px; font-size: 0.9em; color: var(--text-muted);">
+						${domain}
+					</div>
+				`;
+      }
+    );
+    this.statusEl.setText(
+      `\u2705 Done! Scraped: ${result.success}, Failed: ${result.failed}`
+    );
+    this.progressEl.innerHTML = `
+			<div style="text-align: center; color: var(--text-success);">
+				<strong>Complete!</strong><br>
+				Files saved in: ${this.plugin.settings.outputFolder}/
+			</div>
+		`;
+    this.isRunning = false;
+    this.startBtn.disabled = false;
+    this.startBtn.setText("\u{1F504} Run Again");
+  }
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+};
+var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl("h2", { text: "Link Scraper - Settings" });
+    new import_obsidian.Setting(containerEl).setName("Output folder").setDesc("Folder where scraped content will be saved").addText(
+      (text) => text.setPlaceholder("scraped-links").setValue(this.plugin.settings.outputFolder).onChange(async (value) => {
+        this.plugin.settings.outputFolder = value || "scraped-links";
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Add backlinks").setDesc("Automatically add [[link|\u{1F4E5}]] next to URLs in original notes").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.addBacklinks).onChange(async (value) => {
+        this.plugin.settings.addBacklinks = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Skip domains").setDesc("List of domains to skip (comma-separated)").addTextArea(
+      (text) => text.setPlaceholder("youtube.com, twitter.com").setValue(this.plugin.settings.skipDomains).onChange(async (value) => {
+        this.plugin.settings.skipDomains = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Timeout (ms)").setDesc("Maximum time to wait for response").addText(
+      (text) => text.setPlaceholder("20000").setValue(String(this.plugin.settings.timeout)).onChange(async (value) => {
+        this.plugin.settings.timeout = parseInt(value) || 2e4;
+        await this.plugin.saveSettings();
+      })
+    );
+  }
+};
