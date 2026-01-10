@@ -55,7 +55,7 @@ export default class LinkScraperPlugin extends Plugin {
 		await this.loadSettings();
 
 		// Ribbon icon with dropdown menu
-		this.addRibbonIcon("link", "Link Scraper", (evt) => {
+		this.addRibbonIcon("link", "Link scraper", (evt) => {
 			const menu = new Menu();
 
 			menu.addItem((item) =>
@@ -764,7 +764,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Add backlinks")
-			.setDesc("Automatically add [[link|📥]] next to URLs in original notes")
+			.setDesc("Automatically add [[link|📥]] next to urls in original notes")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.addBacklinks)
@@ -802,7 +802,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Skip already scraped")
-			.setDesc("Skip URLs that have already been scraped (file exists in output folder)")
+			.setDesc("Skip urls that have already been scraped (file exists in output folder)")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.skipAlreadyScraped)

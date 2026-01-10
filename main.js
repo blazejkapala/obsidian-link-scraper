@@ -34,7 +34,7 @@ var DEFAULT_SETTINGS = {
 var LinkScraperPlugin = class extends import_obsidian.Plugin {
   async onload() {
     await this.loadSettings();
-    this.addRibbonIcon("link", "Link Scraper", (evt) => {
+    this.addRibbonIcon("link", "Link scraper", (evt) => {
       const menu = new import_obsidian.Menu();
       menu.addItem(
         (item) => item.setTitle("Scrape current note").setIcon("file-text").onClick(() => this.scrapeCurrentNote())
@@ -557,7 +557,7 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Add backlinks").setDesc("Automatically add [[link|\u{1F4E5}]] next to URLs in original notes").addToggle(
+    new import_obsidian.Setting(containerEl).setName("Add backlinks").setDesc("Automatically add [[link|\u{1F4E5}]] next to urls in original notes").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.addBacklinks).onChange(async (value) => {
         this.plugin.settings.addBacklinks = value;
         await this.plugin.saveSettings();
@@ -575,7 +575,7 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Skip already scraped").setDesc("Skip URLs that have already been scraped (file exists in output folder)").addToggle(
+    new import_obsidian.Setting(containerEl).setName("Skip already scraped").setDesc("Skip urls that have already been scraped (file exists in output folder)").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.skipAlreadyScraped).onChange(async (value) => {
         this.plugin.settings.skipAlreadyScraped = value;
         await this.plugin.saveSettings();
