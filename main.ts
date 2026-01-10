@@ -8,9 +8,7 @@ import {
 	TFolder,
 	requestUrl,
 	Modal,
-	MarkdownView,
 	Menu,
-	Editor,
 } from "obsidian";
 
 // ============== Settings ==============
@@ -62,14 +60,14 @@ export default class LinkScraperPlugin extends Plugin {
 
 			menu.addItem((item) =>
 				item
-					.setTitle("🔗 Scrape current note")
+					.setTitle("Scrape current note")
 					.setIcon("file-text")
 					.onClick(() => this.scrapeCurrentNote())
 			);
 
 			menu.addItem((item) =>
 				item
-					.setTitle("📚 Scrape all links in vault")
+					.setTitle("Scrape all links in vault")
 					.setIcon("vault")
 					.onClick(() => new ScraperModal(this.app, this).open())
 			);
@@ -78,7 +76,7 @@ export default class LinkScraperPlugin extends Plugin {
 
 			menu.addItem((item) =>
 				item
-					.setTitle("⚙️ Settings")
+					.setTitle("Settings")
 					.setIcon("settings")
 					.onClick(() => {
 						// @ts-ignore
@@ -97,7 +95,7 @@ export default class LinkScraperPlugin extends Plugin {
 				if (file instanceof TFile && file.extension === "md") {
 					menu.addItem((item) => {
 						item
-							.setTitle("🔗 Scrape links from this note")
+							.setTitle("Scrape links from this note")
 							.setIcon("link")
 							.onClick(async () => {
 								const links = await this.extractLinksFromFile(file);
@@ -124,7 +122,7 @@ export default class LinkScraperPlugin extends Plugin {
 				if (urls.length > 0) {
 					menu.addItem((item) => {
 						item
-							.setTitle(`🔗 Scrape link: ${urls[0].substring(0, 40)}...`)
+							.setTitle("Scrape link: " + urls[0].substring(0, 40) + "...")
 							.setIcon("link")
 							.onClick(async () => {
 								const file = view.file;
@@ -157,12 +155,12 @@ export default class LinkScraperPlugin extends Plugin {
 		this.addCommand({
 			id: "scrape-link-under-cursor",
 			name: "Scrape link under cursor",
-			editorCallback: (editor) => {
+			editorCallback: async (editor) => {
 				const cursor = editor.getCursor();
 				const line = editor.getLine(cursor.line);
 				const urls = this.extractUrlsFromText(line);
 				if (urls.length > 0) {
-					this.scrapeUrls(urls, this.app.workspace.getActiveFile()?.path || "");
+					await this.scrapeUrls(urls, this.app.workspace.getActiveFile()?.path || "");
 				} else {
 					new Notice("No link found in this line");
 				}
@@ -196,9 +194,9 @@ export default class LinkScraperPlugin extends Plugin {
 		const textWithoutMd = text.replace(mdLinkRegex, "");
 
 		// Raw URLs
-		const rawUrlRegex = /(https?:\/\/[^\s<>\[\]()\"\'`]+)/g;
+		const rawUrlRegex = /(https?:\/\/[^\s<>\[\]()"'`]+)/g;
 		while ((match = rawUrlRegex.exec(textWithoutMd)) !== null) {
-			let url = match[1].replace(/[.,;:]+$/, ""); // remove trailing punctuation
+			const url = match[1].replace(/[.,;:]+$/, ""); // remove trailing punctuation
 			if (!urls.includes(url)) {
 				urls.push(url);
 			}
@@ -370,7 +368,7 @@ export default class LinkScraperPlugin extends Plugin {
 			elementsToRemove.forEach((el) => el.remove());
 
 			// Find main content
-			let mainElement =
+			const mainElement =
 				doc.querySelector("main") ||
 				doc.querySelector("article") ||
 				doc.querySelector('[class*="content"]') ||
@@ -417,7 +415,7 @@ export default class LinkScraperPlugin extends Plugin {
 	// Generate safe filename
 	sanitizeFilename(name: string): string {
 		return name
-			.replace(/[<>:\"\/\\|?*]/g, "_")
+			.replace(/[<>:"/\\|?*]/g, "_")
 			.replace(/\s+/g, " ")
 			.trim()
 			.substring(0, 80);
@@ -457,7 +455,7 @@ export default class LinkScraperPlugin extends Plugin {
 
 		// Backlinks to sources
 		const sources = [...new Set(sourceFiles.map((f) => `[[${f.replace(".md", "")}]]`))];
-		const titleSafe = (content.title || content.url).replace(/\"/g, "'");
+		const titleSafe = (content.title || content.url).replace(/"/g, "'");
 
 		// File content
 		let mdContent = `---
@@ -487,7 +485,7 @@ source_notes: ${JSON.stringify(sources)}
 				mdContent += `## Content\n\n*Page has no text content (may use JavaScript)*\n`;
 			}
 		} else {
-			mdContent += `## Scraping Error\n\n⚠️ Failed to scrape: **${content.error}**\n`;
+			mdContent += `## Scraping error\n\nFailed to scrape: **${content.error}**\n`;
 		}
 
 		// Save file
@@ -520,7 +518,7 @@ source_notes: ${JSON.stringify(sources)}
 
 		// For markdown links
 		const mdPattern = new RegExp(
-			`(\\[[^\\]]*\\]\\(${this.escapeRegex(url)}\\))`,
+			"(\\[[^\\]]*\\]\\(" + this.escapeRegex(url) + "\\))",
 			"g"
 		);
 		newContent = newContent.replace(mdPattern, `$1${backlink}`);
@@ -576,7 +574,7 @@ source_notes: ${JSON.stringify(sources)}
 		}
 
 		notice.hide();
-		new Notice(`✅ Scraped: ${success}, ⏭️ Skipped: ${skipped}, ❌ Failed: ${failed}`);
+		new Notice(`Scraped: ${success}, Skipped: ${skipped}, Failed: ${failed}`);
 	}
 
 	// Scrape all links from vault
@@ -635,7 +633,11 @@ source_notes: ${JSON.stringify(sources)}
 class ScraperModal extends Modal {
 	plugin: LinkScraperPlugin;
 	statusEl: HTMLElement;
-	progressEl: HTMLElement;
+	progressContainer: HTMLElement;
+	progressText: HTMLElement;
+	progressBar: HTMLElement;
+	progressBarFill: HTMLElement;
+	progressStatus: HTMLElement;
 	startBtn: HTMLButtonElement;
 	isRunning = false;
 
@@ -647,32 +649,38 @@ class ScraperModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 		contentEl.empty();
+		contentEl.addClass("link-scraper-modal");
 
-		contentEl.createEl("h2", { text: "🔗 Link Scraper" });
+		// Title
+		new Setting(contentEl).setName("Link Scraper").setHeading();
 
 		// Status
 		this.statusEl = contentEl.createEl("p", {
-			text: "Click Start to scan the vault and scrape all links.",
+			text: "Click start to scan the vault and scrape all links.",
+			cls: "link-scraper-status"
 		});
 
-		// Progress
-		this.progressEl = contentEl.createEl("div", { cls: "link-scraper-progress" });
-		this.progressEl.style.cssText =
-			"margin: 20px 0; padding: 10px; background: var(--background-secondary); border-radius: 5px; display: none;";
+		// Progress container
+		this.progressContainer = contentEl.createDiv({ cls: "link-scraper-progress link-scraper-hidden" });
+		
+		this.progressText = this.progressContainer.createDiv({ cls: "link-scraper-progress-text" });
+		
+		const barContainer = this.progressContainer.createDiv({ cls: "link-scraper-bar-container" });
+		this.progressBarFill = barContainer.createDiv({ cls: "link-scraper-bar-fill" });
+		
+		this.progressStatus = this.progressContainer.createDiv({ cls: "link-scraper-progress-status" });
 
 		// Buttons
-		const buttonContainer = contentEl.createEl("div", {
-			cls: "link-scraper-buttons",
+		const buttonContainer = contentEl.createDiv({ cls: "link-scraper-buttons" });
+
+		this.startBtn = buttonContainer.createEl("button", { 
+			text: "Start",
+			cls: "mod-cta"
 		});
-		buttonContainer.style.cssText = "display: flex; gap: 10px; margin-top: 20px;";
+		this.startBtn.addEventListener("click", () => this.startScraping());
 
-		this.startBtn = buttonContainer.createEl("button", { text: "▶️ Start" });
-		this.startBtn.style.cssText = "padding: 10px 20px; cursor: pointer;";
-		this.startBtn.onclick = () => this.startScraping();
-
-		const cancelBtn = buttonContainer.createEl("button", { text: "❌ Close" });
-		cancelBtn.style.cssText = "padding: 10px 20px; cursor: pointer;";
-		cancelBtn.onclick = () => this.close();
+		const cancelBtn = buttonContainer.createEl("button", { text: "Close" });
+		cancelBtn.addEventListener("click", () => this.close());
 	}
 
 	async startScraping() {
@@ -680,8 +688,8 @@ class ScraperModal extends Modal {
 		this.isRunning = true;
 		this.startBtn.disabled = true;
 
-		this.statusEl.setText("📂 Scanning vault...");
-		this.progressEl.style.display = "block";
+		this.statusEl.setText("Scanning vault...");
+		this.progressContainer.removeClass("link-scraper-hidden");
 
 		const allLinks = await this.plugin.scanVaultForLinks();
 		const totalLinks = allLinks.size;
@@ -699,34 +707,24 @@ class ScraperModal extends Modal {
 			allLinks,
 			(current, total, domain, status) => {
 				const percent = Math.round((current / total) * 100);
-				const statusIcon = status === "skipped" ? "⏭️" : "🔄";
-				this.progressEl.innerHTML = `
-					<div style="margin-bottom: 5px;">
-						<strong>${current}/${total}</strong> (${percent}%)
-					</div>
-					<div style="background: var(--background-modifier-border); border-radius: 3px; height: 20px; overflow: hidden;">
-						<div style="background: var(--interactive-accent); height: 100%; width: ${percent}%; transition: width 0.3s;"></div>
-					</div>
-					<div style="margin-top: 5px; font-size: 0.9em; color: var(--text-muted);">
-						${statusIcon} ${domain}
-					</div>
-				`;
+				const statusIcon = status === "skipped" ? "Skipped" : "Processing";
+				
+				this.progressText.setText(`${current}/${total} (${percent}%)`);
+				this.progressBarFill.style.width = `${percent}%`;
+				this.progressStatus.setText(`${statusIcon}: ${domain}`);
 			}
 		);
 
 		this.statusEl.setText(
-			`✅ Done! Scraped: ${result.success}, ⏭️ Skipped: ${result.skipped}, ❌ Failed: ${result.failed}`
+			`Done! Scraped: ${result.success}, Skipped: ${result.skipped}, Failed: ${result.failed}`
 		);
-		this.progressEl.innerHTML = `
-			<div style="text-align: center; color: var(--text-success);">
-				<strong>Complete!</strong><br>
-				Files saved in: ${this.plugin.settings.outputFolder}/
-			</div>
-		`;
+		
+		this.progressText.setText("Complete!");
+		this.progressStatus.setText(`Files saved in: ${this.plugin.settings.outputFolder}/`);
 
 		this.isRunning = false;
 		this.startBtn.disabled = false;
-		this.startBtn.setText("🔄 Run Again");
+		this.startBtn.setText("Run again");
 	}
 
 	onClose() {
@@ -748,7 +746,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "Link Scraper - Settings" });
+		new Setting(containerEl).setName("Link Scraper settings").setHeading();
 
 		new Setting(containerEl)
 			.setName("Output folder")

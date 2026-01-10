@@ -1,10 +1,47 @@
 /* Link Scraper Plugin Styles */
 
+.link-scraper-modal {
+    padding: 10px;
+}
+
+.link-scraper-status {
+    margin: 10px 0;
+}
+
 .link-scraper-progress {
     margin: 20px 0;
     padding: 15px;
     background: var(--background-secondary);
     border-radius: 8px;
+}
+
+.link-scraper-hidden {
+    display: none;
+}
+
+.link-scraper-progress-text {
+    margin-bottom: 8px;
+    font-weight: bold;
+}
+
+.link-scraper-bar-container {
+    background: var(--background-modifier-border);
+    border-radius: 4px;
+    height: 20px;
+    overflow: hidden;
+}
+
+.link-scraper-bar-fill {
+    background: var(--interactive-accent);
+    height: 100%;
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+.link-scraper-progress-status {
+    margin-top: 8px;
+    font-size: 0.9em;
+    color: var(--text-muted);
 }
 
 .link-scraper-buttons {

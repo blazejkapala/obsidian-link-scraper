@@ -37,14 +37,14 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
     this.addRibbonIcon("link", "Link Scraper", (evt) => {
       const menu = new import_obsidian.Menu();
       menu.addItem(
-        (item) => item.setTitle("\u{1F517} Scrape current note").setIcon("file-text").onClick(() => this.scrapeCurrentNote())
+        (item) => item.setTitle("Scrape current note").setIcon("file-text").onClick(() => this.scrapeCurrentNote())
       );
       menu.addItem(
-        (item) => item.setTitle("\u{1F4DA} Scrape all links in vault").setIcon("vault").onClick(() => new ScraperModal(this.app, this).open())
+        (item) => item.setTitle("Scrape all links in vault").setIcon("vault").onClick(() => new ScraperModal(this.app, this).open())
       );
       menu.addSeparator();
       menu.addItem(
-        (item) => item.setTitle("\u2699\uFE0F Settings").setIcon("settings").onClick(() => {
+        (item) => item.setTitle("Settings").setIcon("settings").onClick(() => {
           this.app.setting.open();
           this.app.setting.openTabById("link-scraper");
         })
@@ -55,7 +55,7 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
       this.app.workspace.on("file-menu", (menu, file) => {
         if (file instanceof import_obsidian.TFile && file.extension === "md") {
           menu.addItem((item) => {
-            item.setTitle("\u{1F517} Scrape links from this note").setIcon("link").onClick(async () => {
+            item.setTitle("Scrape links from this note").setIcon("link").onClick(async () => {
               const links = await this.extractLinksFromFile(file);
               if (links.length === 0) {
                 new import_obsidian.Notice("No links found in this note");
@@ -76,7 +76,7 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
         const urls = this.extractUrlsFromText(line);
         if (urls.length > 0) {
           menu.addItem((item) => {
-            item.setTitle(`\u{1F517} Scrape link: ${urls[0].substring(0, 40)}...`).setIcon("link").onClick(async () => {
+            item.setTitle("Scrape link: " + urls[0].substring(0, 40) + "...").setIcon("link").onClick(async () => {
               const file = view.file;
               if (file) {
                 await this.scrapeUrls(urls, file.path);
@@ -101,13 +101,13 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
     this.addCommand({
       id: "scrape-link-under-cursor",
       name: "Scrape link under cursor",
-      editorCallback: (editor) => {
+      editorCallback: async (editor) => {
         var _a;
         const cursor = editor.getCursor();
         const line = editor.getLine(cursor.line);
         const urls = this.extractUrlsFromText(line);
         if (urls.length > 0) {
-          this.scrapeUrls(urls, ((_a = this.app.workspace.getActiveFile()) == null ? void 0 : _a.path) || "");
+          await this.scrapeUrls(urls, ((_a = this.app.workspace.getActiveFile()) == null ? void 0 : _a.path) || "");
         } else {
           new import_obsidian.Notice("No link found in this line");
         }
@@ -130,9 +130,9 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
       urls.push(match[2]);
     }
     const textWithoutMd = text.replace(mdLinkRegex, "");
-    const rawUrlRegex = /(https?:\/\/[^\s<>\[\]()\"\'`]+)/g;
+    const rawUrlRegex = /(https?:\/\/[^\s<>\[\]()"'`]+)/g;
     while ((match = rawUrlRegex.exec(textWithoutMd)) !== null) {
-      let url = match[1].replace(/[.,;:]+$/, "");
+      const url = match[1].replace(/[.,;:]+$/, "");
       if (!urls.includes(url)) {
         urls.push(url);
       }
@@ -270,7 +270,7 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
         "script, style, nav, footer, header, aside, noscript, iframe, svg"
       );
       elementsToRemove.forEach((el) => el.remove());
-      let mainElement = doc.querySelector("main") || doc.querySelector("article") || doc.querySelector('[class*="content"]') || doc.querySelector('[id*="content"]') || doc.body;
+      const mainElement = doc.querySelector("main") || doc.querySelector("article") || doc.querySelector('[class*="content"]') || doc.querySelector('[id*="content"]') || doc.body;
       let content = "";
       if (mainElement) {
         content = mainElement.textContent || "";
@@ -301,7 +301,7 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
   }
   // Generate safe filename
   sanitizeFilename(name) {
-    return name.replace(/[<>:\"\/\\|?*]/g, "_").replace(/\s+/g, " ").trim().substring(0, 80);
+    return name.replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, " ").trim().substring(0, 80);
   }
   // Hash URL
   hashUrl(url) {
@@ -328,7 +328,7 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
     filename = `${filename}_${this.hashUrl(content.url)}.md`;
     const filePath = `${outputFolder}/${filename}`;
     const sources = [...new Set(sourceFiles.map((f) => `[[${f.replace(".md", "")}]]`))];
-    const titleSafe = (content.title || content.url).replace(/\"/g, "'");
+    const titleSafe = (content.title || content.url).replace(/"/g, "'");
     let mdContent = `---
 url: "${content.url}"
 title: "${titleSafe}"
@@ -365,9 +365,9 @@ ${content.content}
 `;
       }
     } else {
-      mdContent += `## Scraping Error
+      mdContent += `## Scraping error
 
-\u26A0\uFE0F Failed to scrape: **${content.error}**
+Failed to scrape: **${content.error}**
 `;
     }
     const existingFile = this.app.vault.getAbstractFileByPath(filePath);
@@ -392,7 +392,7 @@ ${content.content}
       return;
     let newContent = content;
     const mdPattern = new RegExp(
-      `(\\[[^\\]]*\\]\\(${this.escapeRegex(url)}\\))`,
+      "(\\[[^\\]]*\\]\\(" + this.escapeRegex(url) + "\\))",
       "g"
     );
     newContent = newContent.replace(mdPattern, `$1${backlink}`);
@@ -432,7 +432,7 @@ ${content.content}
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     notice.hide();
-    new import_obsidian.Notice(`\u2705 Scraped: ${success}, \u23ED\uFE0F Skipped: ${skipped}, \u274C Failed: ${failed}`);
+    new import_obsidian.Notice(`Scraped: ${success}, Skipped: ${skipped}, Failed: ${failed}`);
   }
   // Scrape all links from vault
   async scrapeAllLinks(allLinks, progressCallback) {
@@ -480,30 +480,33 @@ var ScraperModal = class extends import_obsidian.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "\u{1F517} Link Scraper" });
+    contentEl.addClass("link-scraper-modal");
+    new import_obsidian.Setting(contentEl).setName("Link Scraper").setHeading();
     this.statusEl = contentEl.createEl("p", {
-      text: "Click Start to scan the vault and scrape all links."
+      text: "Click start to scan the vault and scrape all links.",
+      cls: "link-scraper-status"
     });
-    this.progressEl = contentEl.createEl("div", { cls: "link-scraper-progress" });
-    this.progressEl.style.cssText = "margin: 20px 0; padding: 10px; background: var(--background-secondary); border-radius: 5px; display: none;";
-    const buttonContainer = contentEl.createEl("div", {
-      cls: "link-scraper-buttons"
+    this.progressContainer = contentEl.createDiv({ cls: "link-scraper-progress link-scraper-hidden" });
+    this.progressText = this.progressContainer.createDiv({ cls: "link-scraper-progress-text" });
+    const barContainer = this.progressContainer.createDiv({ cls: "link-scraper-bar-container" });
+    this.progressBarFill = barContainer.createDiv({ cls: "link-scraper-bar-fill" });
+    this.progressStatus = this.progressContainer.createDiv({ cls: "link-scraper-progress-status" });
+    const buttonContainer = contentEl.createDiv({ cls: "link-scraper-buttons" });
+    this.startBtn = buttonContainer.createEl("button", {
+      text: "Start",
+      cls: "mod-cta"
     });
-    buttonContainer.style.cssText = "display: flex; gap: 10px; margin-top: 20px;";
-    this.startBtn = buttonContainer.createEl("button", { text: "\u25B6\uFE0F Start" });
-    this.startBtn.style.cssText = "padding: 10px 20px; cursor: pointer;";
-    this.startBtn.onclick = () => this.startScraping();
-    const cancelBtn = buttonContainer.createEl("button", { text: "\u274C Close" });
-    cancelBtn.style.cssText = "padding: 10px 20px; cursor: pointer;";
-    cancelBtn.onclick = () => this.close();
+    this.startBtn.addEventListener("click", () => this.startScraping());
+    const cancelBtn = buttonContainer.createEl("button", { text: "Close" });
+    cancelBtn.addEventListener("click", () => this.close());
   }
   async startScraping() {
     if (this.isRunning)
       return;
     this.isRunning = true;
     this.startBtn.disabled = true;
-    this.statusEl.setText("\u{1F4C2} Scanning vault...");
-    this.progressEl.style.display = "block";
+    this.statusEl.setText("Scanning vault...");
+    this.progressContainer.removeClass("link-scraper-hidden");
     const allLinks = await this.plugin.scanVaultForLinks();
     const totalLinks = allLinks.size;
     if (totalLinks === 0) {
@@ -517,32 +520,20 @@ var ScraperModal = class extends import_obsidian.Modal {
       allLinks,
       (current, total, domain, status) => {
         const percent = Math.round(current / total * 100);
-        const statusIcon = status === "skipped" ? "\u23ED\uFE0F" : "\u{1F504}";
-        this.progressEl.innerHTML = `
-					<div style="margin-bottom: 5px;">
-						<strong>${current}/${total}</strong> (${percent}%)
-					</div>
-					<div style="background: var(--background-modifier-border); border-radius: 3px; height: 20px; overflow: hidden;">
-						<div style="background: var(--interactive-accent); height: 100%; width: ${percent}%; transition: width 0.3s;"></div>
-					</div>
-					<div style="margin-top: 5px; font-size: 0.9em; color: var(--text-muted);">
-						${statusIcon} ${domain}
-					</div>
-				`;
+        const statusIcon = status === "skipped" ? "Skipped" : "Processing";
+        this.progressText.setText(`${current}/${total} (${percent}%)`);
+        this.progressBarFill.style.width = `${percent}%`;
+        this.progressStatus.setText(`${statusIcon}: ${domain}`);
       }
     );
     this.statusEl.setText(
-      `\u2705 Done! Scraped: ${result.success}, \u23ED\uFE0F Skipped: ${result.skipped}, \u274C Failed: ${result.failed}`
+      `Done! Scraped: ${result.success}, Skipped: ${result.skipped}, Failed: ${result.failed}`
     );
-    this.progressEl.innerHTML = `
-			<div style="text-align: center; color: var(--text-success);">
-				<strong>Complete!</strong><br>
-				Files saved in: ${this.plugin.settings.outputFolder}/
-			</div>
-		`;
+    this.progressText.setText("Complete!");
+    this.progressStatus.setText(`Files saved in: ${this.plugin.settings.outputFolder}/`);
     this.isRunning = false;
     this.startBtn.disabled = false;
-    this.startBtn.setText("\u{1F504} Run Again");
+    this.startBtn.setText("Run again");
   }
   onClose() {
     const { contentEl } = this;
@@ -557,7 +548,7 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Link Scraper - Settings" });
+    new import_obsidian.Setting(containerEl).setName("Link Scraper settings").setHeading();
     new import_obsidian.Setting(containerEl).setName("Output folder").setDesc("Folder where scraped content will be saved").addText(
       (text) => text.setPlaceholder("scraped-links").setValue(this.plugin.settings.outputFolder).onChange(async (value) => {
         this.plugin.settings.outputFolder = value || "scraped-links";
