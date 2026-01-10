@@ -1,10 +1,10 @@
 {
 	"id": "link-scraper",
 	"name": "Link Scraper",
-	"version": "1.0.0",
+	"version": "0.2.0",
 	"minAppVersion": "1.0.0",
 	"description": "Scrape content from all URL links in your notes and save them as new notes with backlinks.",
-	"author": "Link Scraper",
-	"authorUrl": "https://github.com",
-	"isDesktopOnly": true
+	"author": "Błażej Kapała",
+	"authorUrl": "https://github.com/blazejkapala",
+	"isDesktopOnly": false
 }

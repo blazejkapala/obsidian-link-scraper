@@ -28,14 +28,64 @@ var DEFAULT_SETTINGS = {
   maxConcurrent: 3,
   timeout: 2e4,
   addBacklinks: true,
-  skipDomains: "youtube.com, youtu.be, twitter.com, x.com, facebook.com"
+  skipDomains: "youtube.com, youtu.be, twitter.com, x.com, facebook.com",
+  skipAlreadyScraped: true
 };
 var LinkScraperPlugin = class extends import_obsidian.Plugin {
   async onload() {
     await this.loadSettings();
-    this.addRibbonIcon("link", "Link Scraper", () => {
-      new ScraperModal(this.app, this).open();
+    this.addRibbonIcon("link", "Link Scraper", (evt) => {
+      const menu = new import_obsidian.Menu();
+      menu.addItem(
+        (item) => item.setTitle("\u{1F517} Scrape current note").setIcon("file-text").onClick(() => this.scrapeCurrentNote())
+      );
+      menu.addItem(
+        (item) => item.setTitle("\u{1F4DA} Scrape all links in vault").setIcon("vault").onClick(() => new ScraperModal(this.app, this).open())
+      );
+      menu.addSeparator();
+      menu.addItem(
+        (item) => item.setTitle("\u2699\uFE0F Settings").setIcon("settings").onClick(() => {
+          this.app.setting.open();
+          this.app.setting.openTabById("link-scraper");
+        })
+      );
+      menu.showAtMouseEvent(evt);
     });
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (file instanceof import_obsidian.TFile && file.extension === "md") {
+          menu.addItem((item) => {
+            item.setTitle("\u{1F517} Scrape links from this note").setIcon("link").onClick(async () => {
+              const links = await this.extractLinksFromFile(file);
+              if (links.length === 0) {
+                new import_obsidian.Notice("No links found in this note");
+                return;
+              }
+              const urls = [...new Set(links.map((l) => l.url))];
+              new import_obsidian.Notice(`Found ${urls.length} links. Scraping...`);
+              await this.scrapeUrls(urls, file.path);
+            });
+          });
+        }
+      })
+    );
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu, editor, view) => {
+        const cursor = editor.getCursor();
+        const line = editor.getLine(cursor.line);
+        const urls = this.extractUrlsFromText(line);
+        if (urls.length > 0) {
+          menu.addItem((item) => {
+            item.setTitle(`\u{1F517} Scrape link: ${urls[0].substring(0, 40)}...`).setIcon("link").onClick(async () => {
+              const file = view.file;
+              if (file) {
+                await this.scrapeUrls(urls, file.path);
+              }
+            });
+          });
+        }
+      })
+    );
     this.addCommand({
       id: "scrape-current-note",
       name: "Scrape links from current note",
@@ -145,10 +195,29 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
       return false;
     }
   }
+  // Check if URL was already scraped (file exists)
+  isAlreadyScraped(url) {
+    if (!this.settings.skipAlreadyScraped)
+      return false;
+    const hash = this.hashUrl(url);
+    const outputFolder = this.settings.outputFolder;
+    const folder = this.app.vault.getAbstractFileByPath(outputFolder);
+    if (folder instanceof import_obsidian.TFolder) {
+      for (const file of folder.children) {
+        if (file instanceof import_obsidian.TFile && file.name.includes(hash)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
   // Scrape single URL
   async scrapeUrl(url) {
     var _a;
     const domain = new URL(url).hostname;
+    if (this.isAlreadyScraped(url)) {
+      return null;
+    }
     if (this.shouldSkipDomain(url)) {
       return {
         url,
@@ -342,10 +411,15 @@ ${content.content}
     const notice = new import_obsidian.Notice(`Scraping ${urls.length} links...`, 0);
     let success = 0;
     let failed = 0;
+    let skipped = 0;
     for (let i = 0; i < urls.length; i++) {
       const url = urls[i];
       notice.setMessage(`Scraping ${i + 1}/${urls.length}: ${new URL(url).hostname}`);
       const content = await this.scrapeUrl(url);
+      if (content === null) {
+        skipped++;
+        continue;
+      }
       if (content.success) {
         success++;
       } else {
@@ -358,20 +432,28 @@ ${content.content}
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     notice.hide();
-    new import_obsidian.Notice(`\u2705 Scraped: ${success}, \u274C Failed: ${failed}`);
+    new import_obsidian.Notice(`\u2705 Scraped: ${success}, \u23ED\uFE0F Skipped: ${skipped}, \u274C Failed: ${failed}`);
   }
   // Scrape all links from vault
   async scrapeAllLinks(allLinks, progressCallback) {
     const urls = Array.from(allLinks.keys());
     let success = 0;
     let failed = 0;
+    let skipped = 0;
     for (let i = 0; i < urls.length; i++) {
       const url = urls[i];
       const domain = new URL(url).hostname;
       if (progressCallback) {
-        progressCallback(i + 1, urls.length, domain);
+        progressCallback(i + 1, urls.length, domain, "scraping");
       }
       const content = await this.scrapeUrl(url);
+      if (content === null) {
+        skipped++;
+        if (progressCallback) {
+          progressCallback(i + 1, urls.length, domain, "skipped");
+        }
+        continue;
+      }
       if (content.success) {
         success++;
       } else {
@@ -386,7 +468,7 @@ ${content.content}
       }
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
-    return { success, failed };
+    return { success, failed, skipped };
   }
 };
 var ScraperModal = class extends import_obsidian.Modal {
@@ -433,8 +515,9 @@ var ScraperModal = class extends import_obsidian.Modal {
     this.statusEl.setText(`Found ${totalLinks} unique links. Scraping...`);
     const result = await this.plugin.scrapeAllLinks(
       allLinks,
-      (current, total, domain) => {
+      (current, total, domain, status) => {
         const percent = Math.round(current / total * 100);
+        const statusIcon = status === "skipped" ? "\u23ED\uFE0F" : "\u{1F504}";
         this.progressEl.innerHTML = `
 					<div style="margin-bottom: 5px;">
 						<strong>${current}/${total}</strong> (${percent}%)
@@ -443,13 +526,13 @@ var ScraperModal = class extends import_obsidian.Modal {
 						<div style="background: var(--interactive-accent); height: 100%; width: ${percent}%; transition: width 0.3s;"></div>
 					</div>
 					<div style="margin-top: 5px; font-size: 0.9em; color: var(--text-muted);">
-						${domain}
+						${statusIcon} ${domain}
 					</div>
 				`;
       }
     );
     this.statusEl.setText(
-      `\u2705 Done! Scraped: ${result.success}, Failed: ${result.failed}`
+      `\u2705 Done! Scraped: ${result.success}, \u23ED\uFE0F Skipped: ${result.skipped}, \u274C Failed: ${result.failed}`
     );
     this.progressEl.innerHTML = `
 			<div style="text-align: center; color: var(--text-success);">
@@ -496,6 +579,12 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("Timeout (ms)").setDesc("Maximum time to wait for response").addText(
       (text) => text.setPlaceholder("20000").setValue(String(this.plugin.settings.timeout)).onChange(async (value) => {
         this.plugin.settings.timeout = parseInt(value) || 2e4;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Skip already scraped").setDesc("Skip URLs that have already been scraped (file exists in output folder)").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.skipAlreadyScraped).onChange(async (value) => {
+        this.plugin.settings.skipAlreadyScraped = value;
         await this.plugin.saveSettings();
       })
     );
