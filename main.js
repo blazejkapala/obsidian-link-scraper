@@ -78,6 +78,161 @@ var DEFAULT_SETTINGS = {
   includeFolders: "",
   excludeFolders: ""
 };
+var BackgroundScrapingManager = class {
+  constructor(plugin) {
+    this.isRunning = false;
+    this.isPaused = false;
+    this.isCancelled = false;
+    this.pendingUrls = [];
+    this.allLinksMap = /* @__PURE__ */ new Map();
+    this.stats = { success: 0, failed: 0, skipped: 0, total: 0, processed: 0 };
+    this.currentUrl = "";
+    this.logEntries = [];
+    this.statusBarEl = null;
+    this.listeners = /* @__PURE__ */ new Set();
+    this.plugin = plugin;
+  }
+  // Subscribe to updates
+  subscribe(callback) {
+    this.listeners.add(callback);
+    return () => this.listeners.delete(callback);
+  }
+  notifyListeners() {
+    this.listeners.forEach((cb) => cb());
+  }
+  addLogEntry(url, status, message) {
+    this.logEntries.push({ url, status, message });
+    if (this.logEntries.length > 100) {
+      this.logEntries.shift();
+    }
+    this.notifyListeners();
+  }
+  updateStatusBar() {
+    if (!this.statusBarEl)
+      return;
+    if (this.isRunning) {
+      const percent = this.stats.total > 0 ? Math.round(this.stats.processed / this.stats.total * 100) : 0;
+      this.statusBarEl.empty();
+      this.statusBarEl.addClass("link-scraper-statusbar-active");
+      const icon = this.statusBarEl.createSpan({ cls: "link-scraper-statusbar-icon" });
+      icon.setText(this.isPaused ? "\u23F8" : "\u{1F517}");
+      const text = this.statusBarEl.createSpan({ cls: "link-scraper-statusbar-text" });
+      text.setText(`${this.stats.processed}/${this.stats.total}`);
+      const barContainer = this.statusBarEl.createSpan({ cls: "link-scraper-statusbar-bar" });
+      const barFill = barContainer.createSpan({ cls: "link-scraper-statusbar-bar-fill" });
+      barFill.style.width = `${percent}%`;
+      this.statusBarEl.show();
+    } else {
+      this.statusBarEl.empty();
+      this.statusBarEl.removeClass("link-scraper-statusbar-active");
+      this.statusBarEl.hide();
+    }
+  }
+  togglePause() {
+    this.isPaused = !this.isPaused;
+    this.updateStatusBar();
+    this.notifyListeners();
+    if (this.isPaused) {
+      this.saveState();
+    }
+  }
+  cancel() {
+    this.isCancelled = true;
+    this.isPaused = false;
+    this.saveState();
+    this.notifyListeners();
+  }
+  saveState() {
+    this.plugin.saveScrapingState({
+      pendingUrls: this.pendingUrls,
+      stats: this.stats,
+      linksMap: Array.from(this.allLinksMap.entries())
+    });
+  }
+  loadState() {
+    const savedState = this.plugin.getSavedScrapingState();
+    if (savedState && savedState.pendingUrls.length > 0) {
+      this.pendingUrls = savedState.pendingUrls;
+      this.stats = savedState.stats;
+      this.allLinksMap = new Map(savedState.linksMap);
+      return true;
+    }
+    return false;
+  }
+  async start(folderPath = null) {
+    var _a, _b, _c;
+    if (this.isRunning)
+      return;
+    this.isRunning = true;
+    this.isPaused = false;
+    this.isCancelled = false;
+    this.logEntries = [];
+    this.updateStatusBar();
+    this.notifyListeners();
+    if (this.pendingUrls.length === 0) {
+      this.allLinksMap = await this.plugin.scanVaultForLinks(folderPath);
+      this.pendingUrls = Array.from(this.allLinksMap.keys());
+      this.stats = { success: 0, failed: 0, skipped: 0, total: this.pendingUrls.length, processed: 0 };
+      if (this.pendingUrls.length === 0) {
+        this.finish("No links found");
+        return;
+      }
+    }
+    this.notifyListeners();
+    while (this.pendingUrls.length > 0 && !this.isCancelled) {
+      while (this.isPaused && !this.isCancelled) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      if (this.isCancelled)
+        break;
+      const url = this.pendingUrls.shift();
+      this.stats.processed++;
+      this.currentUrl = url;
+      this.updateStatusBar();
+      this.notifyListeners();
+      const content = await this.plugin.scrapeUrl(url);
+      if (content === null) {
+        this.stats.skipped++;
+        this.addLogEntry(url, "skipped", "Already scraped");
+      } else if (content.success) {
+        this.stats.success++;
+        const sourceFiles = ((_a = this.allLinksMap.get(url)) == null ? void 0 : _a.map((l) => l.sourceFile)) || [];
+        const savedPath = await this.plugin.saveScrapedContent(content, sourceFiles);
+        if (savedPath && this.plugin.settings.addBacklinks) {
+          for (const link of this.allLinksMap.get(url) || []) {
+            await this.plugin.addBacklinkToNote(link.sourceFile, savedPath, url);
+          }
+        }
+        this.addLogEntry(url, "success", ((_b = content.title) == null ? void 0 : _b.substring(0, 30)) || "OK");
+      } else {
+        this.stats.failed++;
+        this.addLogEntry(url, "failed", ((_c = content.error) == null ? void 0 : _c.substring(0, 30)) || "Error");
+      }
+      this.updateStatusBar();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    if (this.isCancelled) {
+      this.finish(`Cancelled - ${this.pendingUrls.length} remaining`);
+    } else {
+      this.plugin.clearScrapingState();
+      this.finish(`Done: ${this.stats.success} scraped, ${this.stats.skipped} skipped, ${this.stats.failed} failed`);
+    }
+  }
+  finish(message) {
+    this.isRunning = false;
+    this.currentUrl = "";
+    this.updateStatusBar();
+    this.notifyListeners();
+    new import_obsidian.Notice(`Link Scraper: ${message}`);
+  }
+  reset() {
+    this.pendingUrls = [];
+    this.allLinksMap = /* @__PURE__ */ new Map();
+    this.stats = { success: 0, failed: 0, skipped: 0, total: 0, processed: 0 };
+    this.logEntries = [];
+    this.plugin.clearScrapingState();
+  }
+};
 var LinkScraperPlugin = class extends import_obsidian.Plugin {
   constructor() {
     super(...arguments);
@@ -86,8 +241,24 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    this.backgroundManager = new BackgroundScrapingManager(this);
+    this.statusBarEl = this.addStatusBarItem();
+    this.statusBarEl.addClass("link-scraper-statusbar");
+    this.statusBarEl.hide();
+    this.statusBarEl.onClickEvent(() => {
+      new ScraperModal(this.app, this, null, true).open();
+    });
+    this.backgroundManager.statusBarEl = this.statusBarEl;
     this.addRibbonIcon("link", "Link scraper", (evt) => {
       const menu = new import_obsidian.Menu();
+      if (this.backgroundManager.isRunning) {
+        const statusText = this.backgroundManager.isPaused ? "paused" : "running";
+        const percent = this.backgroundManager.stats.total > 0 ? Math.round(this.backgroundManager.stats.processed / this.backgroundManager.stats.total * 100) : 0;
+        menu.addItem(
+          (item) => item.setTitle(`View progress (${percent}% - ${statusText})`).setIcon("activity").onClick(() => new ScraperModal(this.app, this, null, true).open())
+        );
+        menu.addSeparator();
+      }
       menu.addItem(
         (item) => item.setTitle("Scrape current note").setIcon("file-text").onClick(() => this.scrapeCurrentNote())
       );
@@ -172,6 +343,17 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
           await this.scrapeUrls(urls, ((_a = this.app.workspace.getActiveFile()) == null ? void 0 : _a.path) || "");
         } else {
           new import_obsidian.Notice("No link found in this line");
+        }
+      }
+    });
+    this.addCommand({
+      id: "view-scraping-progress",
+      name: "View scraping progress",
+      callback: () => {
+        if (this.backgroundManager.isRunning || this.backgroundManager.pendingUrls.length > 0) {
+          new ScraperModal(this.app, this, null, true).open();
+        } else {
+          new import_obsidian.Notice("No scraping in progress");
         }
       }
     });
@@ -697,17 +879,17 @@ var FolderPickerModal = class extends import_obsidian.Modal {
   }
 };
 var ScraperModal = class extends import_obsidian.Modal {
-  constructor(app, plugin, folderPath = null) {
+  constructor(app, plugin, folderPath = null, isReattaching = false) {
     super(app);
-    // State
-    this.isRunning = false;
-    this.isPaused = false;
-    this.isCancelled = false;
-    this.pendingUrls = [];
-    this.allLinksMap = /* @__PURE__ */ new Map();
-    this.stats = { success: 0, failed: 0, skipped: 0, total: 0, processed: 0 };
+    // Subscription cleanup
+    this.unsubscribe = null;
+    this.lastLogCount = 0;
     this.plugin = plugin;
     this.folderPath = folderPath;
+    this.isReattaching = isReattaching;
+  }
+  get manager() {
+    return this.plugin.backgroundManager;
   }
   onOpen() {
     const { contentEl } = this;
@@ -742,55 +924,101 @@ var ScraperModal = class extends import_obsidian.Modal {
       cls: "link-scraper-hidden"
     });
     this.pauseBtn.addEventListener("click", () => {
-      this.togglePause();
+      this.manager.togglePause();
     });
     this.cancelBtn = buttonContainer.createEl("button", {
       text: "Cancel",
       cls: "link-scraper-hidden mod-warning"
     });
     this.cancelBtn.addEventListener("click", () => {
-      this.cancelScraping();
+      this.manager.cancel();
+    });
+    this.minimizeBtn = buttonContainer.createEl("button", {
+      text: "Minimize",
+      cls: "link-scraper-hidden"
+    });
+    this.minimizeBtn.addEventListener("click", () => {
+      new import_obsidian.Notice("Scraping continues in background. Click status bar to reopen.");
+      this.close();
     });
     const closeBtn = buttonContainer.createEl("button", { text: "Close" });
     closeBtn.addEventListener("click", () => this.close());
-    this.checkForResumableState();
-  }
-  checkForResumableState() {
-    const savedState = this.plugin.getSavedScrapingState();
-    if (savedState && savedState.pendingUrls.length > 0) {
+    this.unsubscribe = this.manager.subscribe(() => this.syncWithManager());
+    if (this.isReattaching && this.manager.isRunning) {
+      this.syncWithManager();
+      this.showRunningUI();
+      this.rebuildLog();
+    } else if (this.manager.loadState()) {
       this.statusEl.setText(
-        `Found interrupted session: ${savedState.pendingUrls.length} URLs remaining. Click Resume to continue.`
+        `Found interrupted session: ${this.manager.pendingUrls.length} URLs remaining. Click resume to continue.`
       );
       this.startBtn.setText("Resume");
-      this.pendingUrls = savedState.pendingUrls;
-      this.stats = savedState.stats;
-      this.allLinksMap = new Map(savedState.linksMap);
     }
   }
-  togglePause() {
-    this.isPaused = !this.isPaused;
-    if (this.isPaused) {
-      this.pauseBtn.setText("Resume");
-      this.progressStatus.setText("Paused - click Resume to continue");
-      this.plugin.saveScrapingState({
-        pendingUrls: this.pendingUrls,
-        stats: this.stats,
-        linksMap: Array.from(this.allLinksMap.entries())
-      });
+  showRunningUI() {
+    this.startBtn.addClass("link-scraper-hidden");
+    this.pauseBtn.removeClass("link-scraper-hidden");
+    this.cancelBtn.removeClass("link-scraper-hidden");
+    this.minimizeBtn.removeClass("link-scraper-hidden");
+    this.progressContainer.removeClass("link-scraper-hidden");
+  }
+  rebuildLog() {
+    this.logContainer.empty();
+    for (const entry of this.manager.logEntries) {
+      this.addLogEntry(entry.url, entry.status, entry.message);
+    }
+    this.lastLogCount = this.manager.logEntries.length;
+  }
+  syncWithManager() {
+    const mgr = this.manager;
+    const percent = mgr.stats.total > 0 ? Math.round(mgr.stats.processed / mgr.stats.total * 100) : 0;
+    this.progressText.setText(`${mgr.stats.processed}/${mgr.stats.total} (${percent}%)`);
+    this.progressBarFill.style.width = `${percent}%`;
+    this.statsEl.setText(
+      `\u2713 ${mgr.stats.success} | \u2717 ${mgr.stats.failed} | \u2298 ${mgr.stats.skipped}`
+    );
+    if (mgr.currentUrl) {
+      try {
+        const domain = new URL(mgr.currentUrl).hostname;
+        this.currentUrlEl.setText(`Processing: ${domain}`);
+      } catch (e) {
+        this.currentUrlEl.setText(`Processing: ${mgr.currentUrl.substring(0, 50)}...`);
+      }
     } else {
-      this.pauseBtn.setText("Pause");
-      this.progressStatus.setText("Resuming...");
+      this.currentUrlEl.setText("");
     }
-  }
-  cancelScraping() {
-    this.isCancelled = true;
-    this.isPaused = false;
-    this.progressStatus.setText("Cancelling...");
-    this.plugin.saveScrapingState({
-      pendingUrls: this.pendingUrls,
-      stats: this.stats,
-      linksMap: Array.from(this.allLinksMap.entries())
-    });
+    const newEntries = mgr.logEntries.slice(this.lastLogCount);
+    for (const entry of newEntries) {
+      this.addLogEntry(entry.url, entry.status, entry.message);
+    }
+    this.lastLogCount = mgr.logEntries.length;
+    if (mgr.isRunning) {
+      this.statusEl.setText(`Scraping ${mgr.stats.total} links...`);
+      this.showRunningUI();
+      if (mgr.isPaused) {
+        this.pauseBtn.setText("Resume");
+        this.progressStatus.setText("Paused - click resume to continue");
+      } else {
+        this.pauseBtn.setText("Pause");
+        this.progressStatus.setText("");
+      }
+    } else {
+      this.startBtn.removeClass("link-scraper-hidden");
+      this.pauseBtn.addClass("link-scraper-hidden");
+      this.cancelBtn.addClass("link-scraper-hidden");
+      this.minimizeBtn.addClass("link-scraper-hidden");
+      this.currentUrlEl.setText("");
+      this.progressStatus.setText(`Files saved in: ${this.plugin.settings.outputFolder}/`);
+      if (mgr.pendingUrls.length > 0) {
+        this.statusEl.setText(`Cancelled. ${mgr.pendingUrls.length} URLs remaining.`);
+        this.startBtn.setText("Resume");
+      } else {
+        this.statusEl.setText(
+          `Done: ${mgr.stats.success} scraped, ${mgr.stats.skipped} skipped, ${mgr.stats.failed} failed`
+        );
+        this.startBtn.setText("Run again");
+      }
+    }
   }
   addLogEntry(url, status, message) {
     var _a;
@@ -809,108 +1037,26 @@ var ScraperModal = class extends import_obsidian.Modal {
       (_a = this.logContainer.firstChild) == null ? void 0 : _a.remove();
     }
   }
-  updateProgress() {
-    const percent = this.stats.total > 0 ? Math.round(this.stats.processed / this.stats.total * 100) : 0;
-    this.progressText.setText(`${this.stats.processed}/${this.stats.total} (${percent}%)`);
-    this.progressBarFill.style.width = `${percent}%`;
-    this.statsEl.setText(
-      `\u2713 ${this.stats.success} | \u2717 ${this.stats.failed} | \u2298 ${this.stats.skipped}`
-    );
-  }
   async startScraping() {
-    var _a, _b, _c;
-    if (this.isRunning)
+    if (this.manager.isRunning)
       return;
-    this.isRunning = true;
-    this.isPaused = false;
-    this.isCancelled = false;
-    this.startBtn.addClass("link-scraper-hidden");
-    this.pauseBtn.removeClass("link-scraper-hidden");
-    this.cancelBtn.removeClass("link-scraper-hidden");
-    this.progressContainer.removeClass("link-scraper-hidden");
-    if (this.pendingUrls.length === 0) {
-      const scopeText = this.folderPath ? `folder "${this.folderPath}"` : "vault";
-      this.statusEl.setText(`Scanning ${scopeText}...`);
-      this.allLinksMap = await this.plugin.scanVaultForLinks(this.folderPath);
-      this.pendingUrls = Array.from(this.allLinksMap.keys());
-      this.stats = { success: 0, failed: 0, skipped: 0, total: this.pendingUrls.length, processed: 0 };
-      if (this.pendingUrls.length === 0) {
-        this.statusEl.setText(`No links found in the ${scopeText}.`);
-        this.finishScraping("No links to process");
-        return;
-      }
+    if (this.manager.pendingUrls.length === 0) {
+      this.manager.reset();
+      this.logContainer.empty();
+      this.lastLogCount = 0;
     }
-    this.statusEl.setText(`Scraping ${this.stats.total} links...`);
-    this.updateProgress();
-    while (this.pendingUrls.length > 0 && !this.isCancelled) {
-      while (this.isPaused && !this.isCancelled) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
-      if (this.isCancelled)
-        break;
-      const url = this.pendingUrls.shift();
-      this.stats.processed++;
-      try {
-        const domain = new URL(url).hostname;
-        this.currentUrlEl.setText(`Processing: ${domain}`);
-      } catch (e) {
-        this.currentUrlEl.setText(`Processing: ${url.substring(0, 50)}...`);
-      }
-      const content = await this.plugin.scrapeUrl(url);
-      if (content === null) {
-        this.stats.skipped++;
-        this.addLogEntry(url, "skipped", "Already scraped");
-      } else if (content.success) {
-        this.stats.success++;
-        const sourceFiles = ((_a = this.allLinksMap.get(url)) == null ? void 0 : _a.map((l) => l.sourceFile)) || [];
-        const savedPath = await this.plugin.saveScrapedContent(content, sourceFiles);
-        if (savedPath && this.plugin.settings.addBacklinks) {
-          for (const link of this.allLinksMap.get(url) || []) {
-            await this.plugin.addBacklinkToNote(link.sourceFile, savedPath, url);
-          }
-        }
-        this.addLogEntry(url, "success", ((_b = content.title) == null ? void 0 : _b.substring(0, 30)) || "OK");
-      } else {
-        this.stats.failed++;
-        this.addLogEntry(url, "failed", ((_c = content.error) == null ? void 0 : _c.substring(0, 30)) || "Error");
-      }
-      this.updateProgress();
-      await new Promise((resolve) => setTimeout(resolve, 300));
-    }
-    if (this.isCancelled) {
-      this.finishScraping(`Cancelled. ${this.pendingUrls.length} URLs remaining - click Resume to continue.`);
-    } else {
-      this.plugin.clearScrapingState();
-      this.finishScraping(
-        `Done: ${this.stats.success} scraped, ${this.stats.skipped} skipped, ${this.stats.failed} failed`
-      );
-    }
-  }
-  finishScraping(message) {
-    this.isRunning = false;
-    this.statusEl.setText(message);
-    this.currentUrlEl.setText("");
-    this.progressStatus.setText(`Files saved in: ${this.plugin.settings.outputFolder}/`);
-    this.startBtn.removeClass("link-scraper-hidden");
-    this.pauseBtn.addClass("link-scraper-hidden");
-    this.cancelBtn.addClass("link-scraper-hidden");
-    if (this.pendingUrls.length > 0) {
-      this.startBtn.setText("Resume");
-    } else {
-      this.startBtn.setText("Run again");
-      this.pendingUrls = [];
-      this.stats = { success: 0, failed: 0, skipped: 0, total: 0, processed: 0 };
-    }
+    this.showRunningUI();
+    this.statusEl.setText("Scanning vault...");
+    void this.manager.start(this.folderPath);
   }
   onClose() {
-    if (this.isRunning && this.pendingUrls.length > 0) {
-      this.plugin.saveScrapingState({
-        pendingUrls: this.pendingUrls,
-        stats: this.stats,
-        linksMap: Array.from(this.allLinksMap.entries())
-      });
+    if (this.unsubscribe) {
+      this.unsubscribe();
+      this.unsubscribe = null;
     }
-    this.isCancelled = true;
+    if (this.manager.isRunning) {
+      new import_obsidian.Notice("Scraping continues in background");
+    }
     const { contentEl } = this;
     contentEl.empty();
   }

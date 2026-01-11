@@ -196,3 +196,49 @@
     background: var(--interactive-accent);
     color: var(--text-on-accent);
 }
+
+/* Status bar */
+.link-scraper-statusbar {
+    cursor: pointer;
+    padding: 0 8px;
+    border-radius: 4px;
+    transition: background 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.link-scraper-statusbar:hover {
+    background: var(--background-modifier-hover);
+}
+
+.link-scraper-statusbar-active {
+    display: flex !important;
+}
+
+.link-scraper-statusbar-icon {
+    font-size: 12px;
+}
+
+.link-scraper-statusbar-text {
+    font-size: 11px;
+    color: var(--text-muted);
+    min-width: 45px;
+}
+
+.link-scraper-statusbar-bar {
+    display: inline-block;
+    width: 60px;
+    height: 6px;
+    background: var(--background-modifier-border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.link-scraper-statusbar-bar-fill {
+    display: block;
+    height: 100%;
+    background: var(--interactive-accent);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
