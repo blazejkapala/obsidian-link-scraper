@@ -28,11 +28,15 @@ var DEFAULT_SETTINGS = {
   maxConcurrent: 3,
   timeout: 2e4,
   addBacklinks: true,
-  skipDomains: "youtube.com, youtu.be, twitter.com, x.com, facebook.com",
+  backlinkText: "scraped",
+  skipDomains: "",
+  skipDomainsWhenExternal: "",
   skipAlreadyScraped: true,
   useExternalScraper: false,
   externalScraperUrl: "https://r.jina.ai/",
-  externalScraperApiKey: ""
+  externalScraperApiKey: "",
+  includeFolders: "",
+  excludeFolders: ""
 };
 var LinkScraperPlugin = class extends import_obsidian.Plugin {
   async onload() {
@@ -155,12 +159,31 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
     }
     return links;
   }
+  // Check if file should be included based on folder settings
+  shouldIncludeFile(filePath) {
+    if (filePath.startsWith(this.settings.outputFolder)) {
+      return false;
+    }
+    const excludeFolders = this.settings.excludeFolders.split(",").map((f) => f.trim()).filter((f) => f.length > 0);
+    for (const folder of excludeFolders) {
+      if (filePath.startsWith(folder) || filePath.startsWith(folder + "/")) {
+        return false;
+      }
+    }
+    const includeFolders = this.settings.includeFolders.split(",").map((f) => f.trim()).filter((f) => f.length > 0);
+    if (includeFolders.length > 0) {
+      return includeFolders.some(
+        (folder) => filePath.startsWith(folder) || filePath.startsWith(folder + "/")
+      );
+    }
+    return true;
+  }
   // Scan entire vault
   async scanVaultForLinks() {
     const allLinks = /* @__PURE__ */ new Map();
     const files = this.app.vault.getMarkdownFiles();
     for (const file of files) {
-      if (file.path.startsWith(this.settings.outputFolder))
+      if (!this.shouldIncludeFile(file.path))
         continue;
       const links = await this.extractLinksFromFile(file);
       for (const link of links) {
@@ -191,8 +214,9 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
   // Check if domain should be skipped
   shouldSkipDomain(url) {
     try {
-      const domain = new URL(url).hostname;
-      const skipList = this.settings.skipDomains.split(",").map((d) => d.trim().toLowerCase());
+      const domain = new URL(url).hostname.toLowerCase();
+      const skipListSetting = this.settings.useExternalScraper ? this.settings.skipDomainsWhenExternal : this.settings.skipDomains;
+      const skipList = skipListSetting.split(",").map((d) => d.trim().toLowerCase()).filter((d) => d.length > 0);
       return skipList.some((skip) => domain.includes(skip));
     } catch (e) {
       return false;
@@ -514,7 +538,8 @@ Failed to scrape: **${content.error}**
       return;
     const content = await this.app.vault.read(file);
     const scrapedName = scrapedPath.replace(".md", "").split("/").pop();
-    const backlink = ` [[${scrapedPath.replace(".md", "")}|\u{1F4E5}]]`;
+    const linkText = this.settings.backlinkText || "scraped";
+    const backlink = ` [[${scrapedPath.replace(".md", "")}|${linkText}]]`;
     if (content.includes(scrapedName))
       return;
     let newContent = content;
@@ -678,24 +703,52 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("Output folder").setDesc("Folder where scraped content will be saved").addText(
-      (text) => text.setPlaceholder("Scraped-links").setValue(this.plugin.settings.outputFolder).onChange(async (value) => {
+    new import_obsidian.Setting(containerEl).setName("Folder scope").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Output folder").setDesc("Folder where scraped content will be saved (also excluded from scanning)").addText(
+      (text) => text.setPlaceholder("scraped-links").setValue(this.plugin.settings.outputFolder).onChange(async (value) => {
         this.plugin.settings.outputFolder = value || "scraped-links";
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Add backlinks").setDesc("Automatically add [[link|\u{1F4E5}]] next to urls in original notes").addToggle(
+    new import_obsidian.Setting(containerEl).setName("Include folders").setDesc("Only scan these folders (comma-separated, empty = all folders)").addTextArea(
+      (text) => text.setPlaceholder("Notes, Projects, Archive").setValue(this.plugin.settings.includeFolders).onChange(async (value) => {
+        this.plugin.settings.includeFolders = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Exclude folders").setDesc("Skip these folders (comma-separated). Output folder is always excluded.").addTextArea(
+      (text) => text.setPlaceholder("Templates, Daily Notes").setValue(this.plugin.settings.excludeFolders).onChange(async (value) => {
+        this.plugin.settings.excludeFolders = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Backlinks").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Add backlinks").setDesc("Automatically add [[link|text]] next to urls in original notes").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.addBacklinks).onChange(async (value) => {
         this.plugin.settings.addBacklinks = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Skip domains").setDesc("List of domains to skip (comma-separated)").addTextArea(
-      (text) => text.setPlaceholder("Youtube.com, twitter.com").setValue(this.plugin.settings.skipDomains).onChange(async (value) => {
+    new import_obsidian.Setting(containerEl).setName("Backlink text").setDesc("Text displayed for backlink (e.g. 'scraped', '\u{1F4E5}', 'archived')").addText(
+      (text) => text.setPlaceholder("scraped").setValue(this.plugin.settings.backlinkText).onChange(async (value) => {
+        this.plugin.settings.backlinkText = value || "scraped";
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Domain filtering").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Skip domains (local scraper)").setDesc("Domains to skip when using built-in scraper (comma-separated)").addTextArea(
+      (text) => text.setPlaceholder("youtube.com, facebook.com, twitter.com").setValue(this.plugin.settings.skipDomains).onChange(async (value) => {
         this.plugin.settings.skipDomains = value;
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("Skip domains (external API)").setDesc("Domains to skip when using external API (fewer needed - Jina handles YouTube, Facebook)").addTextArea(
+      (text) => text.setPlaceholder("Leave empty to scrape all").setValue(this.plugin.settings.skipDomainsWhenExternal).onChange(async (value) => {
+        this.plugin.settings.skipDomainsWhenExternal = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("General").setHeading();
     new import_obsidian.Setting(containerEl).setName("Timeout (ms)").setDesc("Maximum time to wait for response").addText(
       (text) => text.setPlaceholder("20000").setValue(String(this.plugin.settings.timeout)).onChange(async (value) => {
         this.plugin.settings.timeout = parseInt(value) || 2e4;
@@ -709,7 +762,7 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
       })
     );
     new import_obsidian.Setting(containerEl).setName("External scraper API").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Use external scraper").setDesc("Use an external API for better content extraction (recommended for JS-heavy sites)").addToggle(
+    new import_obsidian.Setting(containerEl).setName("Use external scraper").setDesc("Use external API for better extraction (handles YouTube, Facebook, JS-heavy sites)").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.useExternalScraper).onChange(async (value) => {
         this.plugin.settings.useExternalScraper = value;
         await this.plugin.saveSettings();
