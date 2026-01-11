@@ -140,6 +140,13 @@ export default class LinkScraperPlugin extends Plugin {
 
 			menu.addItem((item) =>
 				item
+					.setTitle("Scrape folder...")
+					.setIcon("folder")
+					.onClick(() => new FolderPickerModal(this.app, this).open())
+			);
+
+			menu.addItem((item) =>
+				item
 					.setTitle("Scrape all links in vault")
 					.setIcon("vault")
 					.onClick(() => new ScraperModal(this.app, this).open())
@@ -162,9 +169,10 @@ export default class LinkScraperPlugin extends Plugin {
 			menu.showAtMouseEvent(evt);
 		});
 
-		// File menu (right-click on file)
+		// File menu (right-click on file or folder)
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu, file) => {
+				// For markdown files
 				if (file instanceof TFile && file.extension === "md") {
 					menu.addItem((item) => {
 						item
@@ -179,6 +187,18 @@ export default class LinkScraperPlugin extends Plugin {
 								const urls = [...new Set(links.map((l) => l.url))];
 								new Notice(`Found ${urls.length} links, scraping...`);
 								await this.scrapeUrls(urls, file.path);
+							});
+					});
+				}
+				
+				// For folders
+				if (file instanceof TFolder) {
+					menu.addItem((item) => {
+						item
+							.setTitle("Scrape links from this folder")
+							.setIcon("link")
+							.onClick(() => {
+								new ScraperModal(this.app, this, file.path).open();
 							});
 					});
 				}
@@ -329,13 +349,20 @@ export default class LinkScraperPlugin extends Plugin {
 		return true;
 	}
 
-	// Scan entire vault
-	async scanVaultForLinks(): Promise<Map<string, ExtractedLink[]>> {
+	// Scan vault or specific folder
+	async scanVaultForLinks(folderPath: string | null = null): Promise<Map<string, ExtractedLink[]>> {
 		const allLinks = new Map<string, ExtractedLink[]>();
 		const files = this.app.vault.getMarkdownFiles();
 
 		for (const file of files) {
-			// Check folder inclusion/exclusion
+			// If specific folder is requested, check if file is in that folder
+			if (folderPath !== null) {
+				if (!file.path.startsWith(folderPath) && !file.path.startsWith(folderPath + "/")) {
+					continue;
+				}
+			}
+			
+			// Check folder inclusion/exclusion (from settings)
 			if (!this.shouldIncludeFile(file.path)) continue;
 
 			const links = await this.extractLinksFromFile(file);
@@ -894,18 +921,10 @@ source_notes: ${JSON.stringify(sources)}
 	}
 }
 
-// ============== Progress Modal ==============
-class ScraperModal extends Modal {
+// ============== Folder Picker Modal ==============
+class FolderPickerModal extends Modal {
 	plugin: LinkScraperPlugin;
-	statusEl: HTMLElement;
-	progressContainer: HTMLElement;
-	progressText: HTMLElement;
-	progressBar: HTMLElement;
-	progressBarFill: HTMLElement;
-	progressStatus: HTMLElement;
-	startBtn: HTMLButtonElement;
-	isRunning = false;
-
+	
 	constructor(app: App, plugin: LinkScraperPlugin) {
 		super(app);
 		this.plugin = plugin;
@@ -916,12 +935,81 @@ class ScraperModal extends Modal {
 		contentEl.empty();
 		contentEl.addClass("link-scraper-modal");
 
-		// Title - use descriptive heading without plugin name
-		new Setting(contentEl).setName("Scrape all links").setHeading();
+		new Setting(contentEl).setName("Select folder to scrape").setHeading();
+
+		const folderList = contentEl.createDiv({ cls: "link-scraper-folder-list" });
+		
+		// Get all folders
+		const folders: TFolder[] = [];
+		const walkFolders = (folder: TAbstractFile) => {
+			if (folder instanceof TFolder && folder.path !== this.plugin.settings.outputFolder) {
+				folders.push(folder);
+				for (const child of folder.children) {
+					walkFolders(child);
+				}
+			}
+		};
+		walkFolders(this.app.vault.getRoot());
+
+		// Sort folders alphabetically
+		folders.sort((a, b) => a.path.localeCompare(b.path));
+
+		// Create folder buttons
+		for (const folder of folders) {
+			const folderItem = folderList.createDiv({ cls: "link-scraper-folder-item" });
+			folderItem.createSpan({ text: folder.path || "/ (root)" });
+			folderItem.addEventListener("click", () => {
+				this.close();
+				new ScraperModal(this.app, this.plugin, folder.path).open();
+			});
+		}
+
+		// Close button
+		const buttonContainer = contentEl.createDiv({ cls: "link-scraper-buttons" });
+		const cancelBtn = buttonContainer.createEl("button", { text: "Cancel" });
+		cancelBtn.addEventListener("click", () => this.close());
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
+}
+
+// ============== Progress Modal ==============
+class ScraperModal extends Modal {
+	plugin: LinkScraperPlugin;
+	folderPath: string | null;
+	statusEl: HTMLElement;
+	progressContainer: HTMLElement;
+	progressText: HTMLElement;
+	progressBar: HTMLElement;
+	progressBarFill: HTMLElement;
+	progressStatus: HTMLElement;
+	startBtn: HTMLButtonElement;
+	isRunning = false;
+
+	constructor(app: App, plugin: LinkScraperPlugin, folderPath: string | null = null) {
+		super(app);
+		this.plugin = plugin;
+		this.folderPath = folderPath;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.addClass("link-scraper-modal");
+
+		// Title - different based on scope
+		const title = this.folderPath 
+			? `Scrape links from: ${this.folderPath}`
+			: "Scrape all links";
+		new Setting(contentEl).setName(title).setHeading();
 
 		// Status
+		const scopeText = this.folderPath ? `folder "${this.folderPath}"` : "vault";
 		this.statusEl = contentEl.createEl("p", {
-			text: "Click start to scan the vault and scrape all links.",
+			text: `Click start to scan the ${scopeText} and scrape all links.`,
 			cls: "link-scraper-status"
 		});
 
@@ -955,14 +1043,15 @@ class ScraperModal extends Modal {
 		this.isRunning = true;
 		this.startBtn.disabled = true;
 
-		this.statusEl.setText("Scanning vault...");
+		const scopeText = this.folderPath ? `folder "${this.folderPath}"` : "vault";
+		this.statusEl.setText(`Scanning ${scopeText}...`);
 		this.progressContainer.removeClass("link-scraper-hidden");
 
-		const allLinks = await this.plugin.scanVaultForLinks();
+		const allLinks = await this.plugin.scanVaultForLinks(this.folderPath);
 		const totalLinks = allLinks.size;
 
 		if (totalLinks === 0) {
-			this.statusEl.setText("No links found in the vault.");
+			this.statusEl.setText(`No links found in the ${scopeText}.`);
 			this.isRunning = false;
 			this.startBtn.disabled = false;
 			return;

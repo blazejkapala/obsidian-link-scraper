@@ -87,6 +87,9 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
         (item) => item.setTitle("Scrape current note").setIcon("file-text").onClick(() => this.scrapeCurrentNote())
       );
       menu.addItem(
+        (item) => item.setTitle("Scrape folder...").setIcon("folder").onClick(() => new FolderPickerModal(this.app, this).open())
+      );
+      menu.addItem(
         (item) => item.setTitle("Scrape all links in vault").setIcon("vault").onClick(() => new ScraperModal(this.app, this).open())
       );
       menu.addSeparator();
@@ -111,6 +114,13 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
               const urls = [...new Set(links.map((l) => l.url))];
               new import_obsidian.Notice(`Found ${urls.length} links, scraping...`);
               await this.scrapeUrls(urls, file.path);
+            });
+          });
+        }
+        if (file instanceof import_obsidian.TFolder) {
+          menu.addItem((item) => {
+            item.setTitle("Scrape links from this folder").setIcon("link").onClick(() => {
+              new ScraperModal(this.app, this, file.path).open();
             });
           });
         }
@@ -218,11 +228,16 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
     }
     return true;
   }
-  // Scan entire vault
-  async scanVaultForLinks() {
+  // Scan vault or specific folder
+  async scanVaultForLinks(folderPath = null) {
     const allLinks = /* @__PURE__ */ new Map();
     const files = this.app.vault.getMarkdownFiles();
     for (const file of files) {
+      if (folderPath !== null) {
+        if (!file.path.startsWith(folderPath) && !file.path.startsWith(folderPath + "/")) {
+          continue;
+        }
+      }
       if (!this.shouldIncludeFile(file.path))
         continue;
       const links = await this.extractLinksFromFile(file);
@@ -664,19 +679,61 @@ Failed to scrape: **${content.error}**
     return { success, failed, skipped };
   }
 };
-var ScraperModal = class extends import_obsidian.Modal {
+var FolderPickerModal = class extends import_obsidian.Modal {
   constructor(app, plugin) {
     super(app);
-    this.isRunning = false;
     this.plugin = plugin;
   }
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("link-scraper-modal");
-    new import_obsidian.Setting(contentEl).setName("Scrape all links").setHeading();
+    new import_obsidian.Setting(contentEl).setName("Select folder to scrape").setHeading();
+    const folderList = contentEl.createDiv({ cls: "link-scraper-folder-list" });
+    const folders = [];
+    const walkFolders = (folder) => {
+      if (folder instanceof import_obsidian.TFolder && folder.path !== this.plugin.settings.outputFolder) {
+        folders.push(folder);
+        for (const child of folder.children) {
+          walkFolders(child);
+        }
+      }
+    };
+    walkFolders(this.app.vault.getRoot());
+    folders.sort((a, b) => a.path.localeCompare(b.path));
+    for (const folder of folders) {
+      const folderItem = folderList.createDiv({ cls: "link-scraper-folder-item" });
+      folderItem.createSpan({ text: folder.path || "/ (root)" });
+      folderItem.addEventListener("click", () => {
+        this.close();
+        new ScraperModal(this.app, this.plugin, folder.path).open();
+      });
+    }
+    const buttonContainer = contentEl.createDiv({ cls: "link-scraper-buttons" });
+    const cancelBtn = buttonContainer.createEl("button", { text: "Cancel" });
+    cancelBtn.addEventListener("click", () => this.close());
+  }
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+};
+var ScraperModal = class extends import_obsidian.Modal {
+  constructor(app, plugin, folderPath = null) {
+    super(app);
+    this.isRunning = false;
+    this.plugin = plugin;
+    this.folderPath = folderPath;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("link-scraper-modal");
+    const title = this.folderPath ? `Scrape links from: ${this.folderPath}` : "Scrape all links";
+    new import_obsidian.Setting(contentEl).setName(title).setHeading();
+    const scopeText = this.folderPath ? `folder "${this.folderPath}"` : "vault";
     this.statusEl = contentEl.createEl("p", {
-      text: "Click start to scan the vault and scrape all links.",
+      text: `Click start to scan the ${scopeText} and scrape all links.`,
       cls: "link-scraper-status"
     });
     this.progressContainer = contentEl.createDiv({ cls: "link-scraper-progress link-scraper-hidden" });
@@ -700,12 +757,13 @@ var ScraperModal = class extends import_obsidian.Modal {
       return;
     this.isRunning = true;
     this.startBtn.disabled = true;
-    this.statusEl.setText("Scanning vault...");
+    const scopeText = this.folderPath ? `folder "${this.folderPath}"` : "vault";
+    this.statusEl.setText(`Scanning ${scopeText}...`);
     this.progressContainer.removeClass("link-scraper-hidden");
-    const allLinks = await this.plugin.scanVaultForLinks();
+    const allLinks = await this.plugin.scanVaultForLinks(this.folderPath);
     const totalLinks = allLinks.size;
     if (totalLinks === 0) {
-      this.statusEl.setText("No links found in the vault.");
+      this.statusEl.setText(`No links found in the ${scopeText}.`);
       this.isRunning = false;
       this.startBtn.disabled = false;
       return;

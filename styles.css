@@ -66,3 +66,32 @@
 .link-scraper-wide-input {
     width: 100%;
 }
+
+/* Folder picker styles */
+.link-scraper-folder-list {
+    max-height: 400px;
+    overflow-y: auto;
+    margin: 15px 0;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+}
+
+.link-scraper-folder-item {
+    padding: 10px 15px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--background-modifier-border);
+    transition: background 0.15s ease;
+}
+
+.link-scraper-folder-item:last-child {
+    border-bottom: none;
+}
+
+.link-scraper-folder-item:hover {
+    background: var(--background-secondary);
+}
+
+.link-scraper-folder-item:active {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
