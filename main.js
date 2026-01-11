@@ -552,7 +552,7 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     new import_obsidian.Setting(containerEl).setName("Output folder").setDesc("Folder where scraped content will be saved").addText(
-      (text) => text.setPlaceholder("scraped-links").setValue(this.plugin.settings.outputFolder).onChange(async (value) => {
+      (text) => text.setPlaceholder("Scraped-links").setValue(this.plugin.settings.outputFolder).onChange(async (value) => {
         this.plugin.settings.outputFolder = value || "scraped-links";
         await this.plugin.saveSettings();
       })
@@ -564,7 +564,7 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
       })
     );
     new import_obsidian.Setting(containerEl).setName("Skip domains").setDesc("List of domains to skip (comma-separated)").addTextArea(
-      (text) => text.setPlaceholder("youtube.com, twitter.com").setValue(this.plugin.settings.skipDomains).onChange(async (value) => {
+      (text) => text.setPlaceholder("Youtube.com, twitter.com").setValue(this.plugin.settings.skipDomains).onChange(async (value) => {
         this.plugin.settings.skipDomains = value;
         await this.plugin.saveSettings();
       })

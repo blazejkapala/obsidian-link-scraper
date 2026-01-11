@@ -754,7 +754,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 			.setDesc("Folder where scraped content will be saved")
 			.addText((text) =>
 				text
-					.setPlaceholder("scraped-links")
+					.setPlaceholder("Scraped-links")
 					.setValue(this.plugin.settings.outputFolder)
 					.onChange(async (value) => {
 						this.plugin.settings.outputFolder = value || "scraped-links";
@@ -779,7 +779,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 			.setDesc("List of domains to skip (comma-separated)")
 			.addTextArea((text) =>
 				text
-					.setPlaceholder("youtube.com, twitter.com")
+					.setPlaceholder("Youtube.com, twitter.com")
 					.setValue(this.plugin.settings.skipDomains)
 					.onChange(async (value) => {
 						this.plugin.settings.skipDomains = value;
