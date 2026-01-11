@@ -23,6 +23,46 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
+var FolderSuggest = class extends import_obsidian.AbstractInputSuggest {
+  constructor(app, inputEl) {
+    super(app, inputEl);
+    this.inputEl = inputEl;
+  }
+  getSuggestions(inputStr) {
+    const folders = [];
+    const lowerInput = inputStr.toLowerCase();
+    const currentValue = this.inputEl.value;
+    const lastComma = currentValue.lastIndexOf(",");
+    const searchTerm = lastComma >= 0 ? currentValue.substring(lastComma + 1).trim().toLowerCase() : lowerInput;
+    const walkFolders = (folder) => {
+      if (folder instanceof import_obsidian.TFolder) {
+        if (folder.path.toLowerCase().includes(searchTerm) || searchTerm === "") {
+          folders.push(folder);
+        }
+        for (const child of folder.children) {
+          walkFolders(child);
+        }
+      }
+    };
+    walkFolders(this.app.vault.getRoot());
+    return folders.slice(0, 20);
+  }
+  renderSuggestion(folder, el) {
+    el.createEl("div", { text: folder.path || "/" });
+  }
+  selectSuggestion(folder) {
+    const currentValue = this.inputEl.value;
+    const lastComma = currentValue.lastIndexOf(",");
+    if (lastComma >= 0) {
+      const prefix = currentValue.substring(0, lastComma + 1);
+      this.inputEl.value = `${prefix} ${folder.path}`;
+    } else {
+      this.inputEl.value = folder.path;
+    }
+    this.inputEl.trigger("input");
+    this.close();
+  }
+};
 var DEFAULT_SETTINGS = {
   outputFolder: "scraped-links",
   maxConcurrent: 3,
@@ -704,24 +744,29 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     new import_obsidian.Setting(containerEl).setName("Folder scope").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Output folder").setDesc("Folder where scraped content will be saved (also excluded from scanning)").addText(
-      (text) => text.setPlaceholder("scraped-links").setValue(this.plugin.settings.outputFolder).onChange(async (value) => {
+    new import_obsidian.Setting(containerEl).setName("Output folder").setDesc("Folder where scraped content will be saved (also excluded from scanning)").addText((text) => {
+      text.setPlaceholder("scraped-links").setValue(this.plugin.settings.outputFolder).onChange(async (value) => {
         this.plugin.settings.outputFolder = value || "scraped-links";
         await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("Include folders").setDesc("Only scan these folders (comma-separated, empty = all folders)").addTextArea(
-      (text) => text.setPlaceholder("Notes, Projects, Archive").setValue(this.plugin.settings.includeFolders).onChange(async (value) => {
+      });
+      new FolderSuggest(this.app, text.inputEl);
+    });
+    new import_obsidian.Setting(containerEl).setName("Include folders").setDesc("Only scan these folders (comma-separated, empty = all). Start typing to see suggestions.").addText((text) => {
+      text.setPlaceholder("Notes, Projects, Archive").setValue(this.plugin.settings.includeFolders).onChange(async (value) => {
         this.plugin.settings.includeFolders = value;
         await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("Exclude folders").setDesc("Skip these folders (comma-separated). Output folder is always excluded.").addTextArea(
-      (text) => text.setPlaceholder("Templates, Daily Notes").setValue(this.plugin.settings.excludeFolders).onChange(async (value) => {
+      });
+      text.inputEl.addClass("link-scraper-wide-input");
+      new FolderSuggest(this.app, text.inputEl);
+    });
+    new import_obsidian.Setting(containerEl).setName("Exclude folders").setDesc("Skip these folders (comma-separated). Output folder is always excluded.").addText((text) => {
+      text.setPlaceholder("Templates, Daily Notes").setValue(this.plugin.settings.excludeFolders).onChange(async (value) => {
         this.plugin.settings.excludeFolders = value;
         await this.plugin.saveSettings();
-      })
-    );
+      });
+      text.inputEl.addClass("link-scraper-wide-input");
+      new FolderSuggest(this.app, text.inputEl);
+    });
     new import_obsidian.Setting(containerEl).setName("Backlinks").setHeading();
     new import_obsidian.Setting(containerEl).setName("Add backlinks").setDesc("Automatically add [[link|text]] next to urls in original notes").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.addBacklinks).onChange(async (value) => {

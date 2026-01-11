@@ -9,7 +9,66 @@ import {
 	requestUrl,
 	Modal,
 	Menu,
+	AbstractInputSuggest,
+	TAbstractFile,
 } from "obsidian";
+
+// ============== Folder Suggester ==============
+class FolderSuggest extends AbstractInputSuggest<TFolder> {
+	private inputEl: HTMLInputElement;
+
+	constructor(app: App, inputEl: HTMLInputElement) {
+		super(app, inputEl);
+		this.inputEl = inputEl;
+	}
+
+	getSuggestions(inputStr: string): TFolder[] {
+		const folders: TFolder[] = [];
+		const lowerInput = inputStr.toLowerCase();
+		
+		// Get current value to check for comma-separated input
+		const currentValue = this.inputEl.value;
+		const lastComma = currentValue.lastIndexOf(",");
+		const searchTerm = lastComma >= 0 
+			? currentValue.substring(lastComma + 1).trim().toLowerCase()
+			: lowerInput;
+
+		const walkFolders = (folder: TAbstractFile) => {
+			if (folder instanceof TFolder) {
+				if (folder.path.toLowerCase().includes(searchTerm) || searchTerm === "") {
+					folders.push(folder);
+				}
+				for (const child of folder.children) {
+					walkFolders(child);
+				}
+			}
+		};
+
+		walkFolders(this.app.vault.getRoot());
+		
+		return folders.slice(0, 20); // Limit to 20 suggestions
+	}
+
+	renderSuggestion(folder: TFolder, el: HTMLElement): void {
+		el.createEl("div", { text: folder.path || "/" });
+	}
+
+	selectSuggestion(folder: TFolder): void {
+		const currentValue = this.inputEl.value;
+		const lastComma = currentValue.lastIndexOf(",");
+		
+		if (lastComma >= 0) {
+			// Append to existing list
+			const prefix = currentValue.substring(0, lastComma + 1);
+			this.inputEl.value = `${prefix} ${folder.path}`;
+		} else {
+			this.inputEl.value = folder.path;
+		}
+		
+		this.inputEl.trigger("input");
+		this.close();
+	}
+}
 
 // ============== Settings ==============
 interface LinkScraperSettings {
@@ -960,41 +1019,46 @@ class LinkScraperSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Output folder")
 			.setDesc("Folder where scraped content will be saved (also excluded from scanning)")
-			.addText((text) =>
+			.addText((text) => {
 				text
 					.setPlaceholder("scraped-links")
 					.setValue(this.plugin.settings.outputFolder)
 					.onChange(async (value) => {
 						this.plugin.settings.outputFolder = value || "scraped-links";
 						await this.plugin.saveSettings();
-					})
-			);
+					});
+				new FolderSuggest(this.app, text.inputEl);
+			});
 
 		new Setting(containerEl)
 			.setName("Include folders")
-			.setDesc("Only scan these folders (comma-separated, empty = all folders)")
-			.addTextArea((text) =>
+			.setDesc("Only scan these folders (comma-separated, empty = all). Start typing to see suggestions.")
+			.addText((text) => {
 				text
 					.setPlaceholder("Notes, Projects, Archive")
 					.setValue(this.plugin.settings.includeFolders)
 					.onChange(async (value) => {
 						this.plugin.settings.includeFolders = value;
 						await this.plugin.saveSettings();
-					})
-			);
+					});
+				text.inputEl.addClass("link-scraper-wide-input");
+				new FolderSuggest(this.app, text.inputEl);
+			});
 
 		new Setting(containerEl)
 			.setName("Exclude folders")
 			.setDesc("Skip these folders (comma-separated). Output folder is always excluded.")
-			.addTextArea((text) =>
+			.addText((text) => {
 				text
 					.setPlaceholder("Templates, Daily Notes")
 					.setValue(this.plugin.settings.excludeFolders)
 					.onChange(async (value) => {
 						this.plugin.settings.excludeFolders = value;
 						await this.plugin.saveSettings();
-					})
-			);
+					});
+				text.inputEl.addClass("link-scraper-wide-input");
+				new FolderSuggest(this.app, text.inputEl);
+			});
 
 		// Backlinks section
 		new Setting(containerEl).setName("Backlinks").setHeading();

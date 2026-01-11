@@ -61,3 +61,8 @@
     background: var(--interactive-accent);
     color: var(--text-on-accent);
 }
+
+/* Settings styles */
+.link-scraper-wide-input {
+    width: 100%;
+}
