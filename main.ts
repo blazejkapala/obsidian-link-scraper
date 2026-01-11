@@ -19,6 +19,9 @@ interface LinkScraperSettings {
 	addBacklinks: boolean;
 	skipDomains: string;
 	skipAlreadyScraped: boolean;
+	useExternalScraper: boolean;
+	externalScraperUrl: string;
+	externalScraperApiKey: string;
 }
 
 const DEFAULT_SETTINGS: LinkScraperSettings = {
@@ -28,6 +31,9 @@ const DEFAULT_SETTINGS: LinkScraperSettings = {
 	addBacklinks: true,
 	skipDomains: "youtube.com, youtu.be, twitter.com, x.com, facebook.com",
 	skipAlreadyScraped: true,
+	useExternalScraper: false,
+	externalScraperUrl: "https://r.jina.ai/",
+	externalScraperApiKey: "",
 };
 
 // ============== Types ==============
@@ -314,6 +320,11 @@ export default class LinkScraperPlugin extends Plugin {
 			};
 		}
 
+		// Use external scraper API if enabled
+		if (this.settings.useExternalScraper) {
+			return this.scrapeWithExternalApi(url, domain);
+		}
+
 		try {
 			const response = await requestUrl({
 				url,
@@ -443,6 +454,113 @@ export default class LinkScraperPlugin extends Plugin {
 				domain,
 				success: false,
 				error: String(e).substring(0, 200),
+			};
+		}
+	}
+
+	// Scrape using external API (Jina Reader, Firecrawl, etc.)
+	async scrapeWithExternalApi(url: string, domain: string): Promise<ScrapedContent> {
+		try {
+			const apiUrl = this.settings.externalScraperUrl;
+			const apiKey = this.settings.externalScraperApiKey;
+
+			// Build request URL - Jina Reader style (prepend URL)
+			let requestUrlStr = apiUrl;
+			if (apiUrl.includes("r.jina.ai") || apiUrl.endsWith("/")) {
+				requestUrlStr = apiUrl + url;
+			} else {
+				// Custom API - assume it takes URL as query param
+				requestUrlStr = apiUrl + "?url=" + encodeURIComponent(url);
+			}
+
+			const headers: Record<string, string> = {
+				"Accept": "text/plain, application/json",
+				"User-Agent": "ObsidianLinkScraper/1.0",
+			};
+
+			// Add API key if provided
+			if (apiKey) {
+				headers["Authorization"] = `Bearer ${apiKey}`;
+				headers["X-API-Key"] = apiKey;
+			}
+
+			const response = await requestUrl({
+				url: requestUrlStr,
+				method: "GET",
+				headers,
+			});
+
+			if (response.status !== 200) {
+				return {
+					url,
+					title: "",
+					description: "",
+					content: "",
+					domain,
+					success: false,
+					error: `External API error: HTTP ${response.status}`,
+				};
+			}
+
+			const text = response.text;
+
+			// Try to parse as JSON first (some APIs return JSON)
+			try {
+				const json = JSON.parse(text);
+				return {
+					url,
+					title: json.title || json.data?.title || "",
+					description: json.description || json.data?.description || "",
+					content: json.content || json.data?.content || json.markdown || json.data?.markdown || json.text || "",
+					domain,
+					success: true,
+				};
+			} catch {
+				// Not JSON, treat as plain text/markdown (Jina Reader returns markdown)
+			}
+
+			// Parse Jina Reader markdown response
+			let title = "";
+			let content = text;
+
+			// Jina Reader format: Title: ...\nURL Source: ...\n\nContent...
+			const lines = text.split("\n");
+			if (lines[0]?.startsWith("Title:")) {
+				title = lines[0].replace("Title:", "").trim();
+			}
+
+			// Find where actual content starts (after metadata)
+			let contentStartIndex = 0;
+			for (let i = 0; i < Math.min(10, lines.length); i++) {
+				if (lines[i] === "" && i > 0) {
+					contentStartIndex = i + 1;
+					break;
+				}
+			}
+			content = lines.slice(contentStartIndex).join("\n").trim();
+
+			// Limit content length
+			if (content.length > 50000) {
+				content = content.substring(0, 50000) + "\n\n[... content truncated ...]";
+			}
+
+			return {
+				url,
+				title,
+				description: "",
+				content,
+				domain,
+				success: true,
+			};
+		} catch (e) {
+			return {
+				url,
+				title: "",
+				description: "",
+				content: "",
+				domain,
+				success: false,
+				error: `External API error: ${String(e).substring(0, 200)}`,
 			};
 		}
 	}
@@ -843,6 +961,47 @@ class LinkScraperSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.skipAlreadyScraped)
 					.onChange(async (value) => {
 						this.plugin.settings.skipAlreadyScraped = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		// External scraper section
+		new Setting(containerEl).setName("External scraper API").setHeading();
+
+		new Setting(containerEl)
+			.setName("Use external scraper")
+			.setDesc("Use an external API for better content extraction (recommended for JS-heavy sites)")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.useExternalScraper)
+					.onChange(async (value) => {
+						this.plugin.settings.useExternalScraper = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Scraper API url")
+			.setDesc("API endpoint (default: Jina Reader - free, no key required)")
+			.addText((text) =>
+				text
+					.setPlaceholder("https://r.jina.ai/")
+					.setValue(this.plugin.settings.externalScraperUrl)
+					.onChange(async (value) => {
+						this.plugin.settings.externalScraperUrl = value || "https://r.jina.ai/";
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("API key (optional)")
+			.setDesc("API key for services that require authentication")
+			.addText((text) =>
+				text
+					.setPlaceholder("Enter API key")
+					.setValue(this.plugin.settings.externalScraperApiKey)
+					.onChange(async (value) => {
+						this.plugin.settings.externalScraperApiKey = value;
 						await this.plugin.saveSettings();
 					})
 			);

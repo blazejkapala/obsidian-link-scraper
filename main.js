@@ -29,7 +29,10 @@ var DEFAULT_SETTINGS = {
   timeout: 2e4,
   addBacklinks: true,
   skipDomains: "youtube.com, youtu.be, twitter.com, x.com, facebook.com",
-  skipAlreadyScraped: true
+  skipAlreadyScraped: true,
+  useExternalScraper: false,
+  externalScraperUrl: "https://r.jina.ai/",
+  externalScraperApiKey: ""
 };
 var LinkScraperPlugin = class extends import_obsidian.Plugin {
   async onload() {
@@ -229,6 +232,9 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
         error: "Domain on skip list"
       };
     }
+    if (this.settings.useExternalScraper) {
+      return this.scrapeWithExternalApi(url, domain);
+    }
     try {
       const response = await (0, import_obsidian.requestUrl)({
         url,
@@ -331,6 +337,92 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
         domain,
         success: false,
         error: String(e).substring(0, 200)
+      };
+    }
+  }
+  // Scrape using external API (Jina Reader, Firecrawl, etc.)
+  async scrapeWithExternalApi(url, domain) {
+    var _a, _b, _c, _d, _e;
+    try {
+      const apiUrl = this.settings.externalScraperUrl;
+      const apiKey = this.settings.externalScraperApiKey;
+      let requestUrlStr = apiUrl;
+      if (apiUrl.includes("r.jina.ai") || apiUrl.endsWith("/")) {
+        requestUrlStr = apiUrl + url;
+      } else {
+        requestUrlStr = apiUrl + "?url=" + encodeURIComponent(url);
+      }
+      const headers = {
+        "Accept": "text/plain, application/json",
+        "User-Agent": "ObsidianLinkScraper/1.0"
+      };
+      if (apiKey) {
+        headers["Authorization"] = `Bearer ${apiKey}`;
+        headers["X-API-Key"] = apiKey;
+      }
+      const response = await (0, import_obsidian.requestUrl)({
+        url: requestUrlStr,
+        method: "GET",
+        headers
+      });
+      if (response.status !== 200) {
+        return {
+          url,
+          title: "",
+          description: "",
+          content: "",
+          domain,
+          success: false,
+          error: `External API error: HTTP ${response.status}`
+        };
+      }
+      const text = response.text;
+      try {
+        const json = JSON.parse(text);
+        return {
+          url,
+          title: json.title || ((_a = json.data) == null ? void 0 : _a.title) || "",
+          description: json.description || ((_b = json.data) == null ? void 0 : _b.description) || "",
+          content: json.content || ((_c = json.data) == null ? void 0 : _c.content) || json.markdown || ((_d = json.data) == null ? void 0 : _d.markdown) || json.text || "",
+          domain,
+          success: true
+        };
+      } catch (e) {
+      }
+      let title = "";
+      let content = text;
+      const lines = text.split("\n");
+      if ((_e = lines[0]) == null ? void 0 : _e.startsWith("Title:")) {
+        title = lines[0].replace("Title:", "").trim();
+      }
+      let contentStartIndex = 0;
+      for (let i = 0; i < Math.min(10, lines.length); i++) {
+        if (lines[i] === "" && i > 0) {
+          contentStartIndex = i + 1;
+          break;
+        }
+      }
+      content = lines.slice(contentStartIndex).join("\n").trim();
+      if (content.length > 5e4) {
+        content = content.substring(0, 5e4) + "\n\n[... content truncated ...]";
+      }
+      return {
+        url,
+        title,
+        description: "",
+        content,
+        domain,
+        success: true
+      };
+    } catch (e) {
+      return {
+        url,
+        title: "",
+        description: "",
+        content: "",
+        domain,
+        success: false,
+        error: `External API error: ${String(e).substring(0, 200)}`
       };
     }
   }
@@ -613,6 +705,25 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("Skip already scraped").setDesc("Skip urls that have already been scraped (file exists in output folder)").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.skipAlreadyScraped).onChange(async (value) => {
         this.plugin.settings.skipAlreadyScraped = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("External scraper API").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Use external scraper").setDesc("Use an external API for better content extraction (recommended for JS-heavy sites)").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.useExternalScraper).onChange(async (value) => {
+        this.plugin.settings.useExternalScraper = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Scraper API url").setDesc("API endpoint (default: Jina Reader - free, no key required)").addText(
+      (text) => text.setPlaceholder("https://r.jina.ai/").setValue(this.plugin.settings.externalScraperUrl).onChange(async (value) => {
+        this.plugin.settings.externalScraperUrl = value || "https://r.jina.ai/";
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("API key (optional)").setDesc("API key for services that require authentication").addText(
+      (text) => text.setPlaceholder("Enter API key").setValue(this.plugin.settings.externalScraperApiKey).onChange(async (value) => {
+        this.plugin.settings.externalScraperApiKey = value;
         await this.plugin.saveSettings();
       })
     );
