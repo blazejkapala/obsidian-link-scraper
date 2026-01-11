@@ -826,7 +826,7 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
       new FolderSuggest(this.app, text.inputEl);
     });
     new import_obsidian.Setting(containerEl).setName("Backlinks").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Add backlinks").setDesc("Automatically add [[link|text]] next to urls in original notes").addToggle(
+    new import_obsidian.Setting(containerEl).setName("Add backlinks").setDesc("Automatically add [[link|text]] next to URLs in original notes").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.addBacklinks).onChange(async (value) => {
         this.plugin.settings.addBacklinks = value;
         await this.plugin.saveSettings();
@@ -858,20 +858,20 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Skip already scraped").setDesc("Skip urls that have already been scraped (file exists in output folder)").addToggle(
+    new import_obsidian.Setting(containerEl).setName("Skip already scraped").setDesc("Skip URLs that have already been scraped (file exists in output folder)").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.skipAlreadyScraped).onChange(async (value) => {
         this.plugin.settings.skipAlreadyScraped = value;
         await this.plugin.saveSettings();
       })
     );
     new import_obsidian.Setting(containerEl).setName("External scraper API").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Use external scraper").setDesc("Use external API for better extraction (handles YouTube, Facebook, JS-heavy sites)").addToggle(
+    new import_obsidian.Setting(containerEl).setName("Use external scraper").setDesc("Use external API for better extraction (handles YouTube, Facebook, JavaScript-heavy sites)").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.useExternalScraper).onChange(async (value) => {
         this.plugin.settings.useExternalScraper = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Scraper API url").setDesc("API endpoint (default: Jina Reader - free, no key required)").addText(
+    new import_obsidian.Setting(containerEl).setName("Scraper API URL").setDesc("API endpoint (default: Jina Reader - free, no key required)").addText(
       (text) => text.setPlaceholder("https://r.jina.ai/").setValue(this.plugin.settings.externalScraperUrl).onChange(async (value) => {
         this.plugin.settings.externalScraperUrl = value || "https://r.jina.ai/";
         await this.plugin.saveSettings();

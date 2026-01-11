@@ -1154,7 +1154,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Add backlinks")
-			.setDesc("Automatically add [[link|text]] next to urls in original notes")
+			.setDesc("Automatically add [[link|text]] next to URLs in original notes")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.addBacklinks)
@@ -1224,7 +1224,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Skip already scraped")
-			.setDesc("Skip urls that have already been scraped (file exists in output folder)")
+			.setDesc("Skip URLs that have already been scraped (file exists in output folder)")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.skipAlreadyScraped)
@@ -1239,7 +1239,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Use external scraper")
-			.setDesc("Use external API for better extraction (handles YouTube, Facebook, JS-heavy sites)")
+			.setDesc("Use external API for better extraction (handles YouTube, Facebook, JavaScript-heavy sites)")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.useExternalScraper)
@@ -1250,7 +1250,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Scraper API url")
+			.setName("Scraper API URL")
 			.setDesc("API endpoint (default: Jina Reader - free, no key required)")
 			.addText((text) =>
 				text
