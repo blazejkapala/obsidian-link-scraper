@@ -19,15 +19,28 @@
     display: none;
 }
 
-.link-scraper-progress-text {
+/* Progress header with stats */
+.link-scraper-progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 8px;
+}
+
+.link-scraper-progress-text {
     font-weight: bold;
+    font-size: 1.1em;
+}
+
+.link-scraper-stats {
+    font-size: 0.9em;
+    color: var(--text-muted);
 }
 
 .link-scraper-bar-container {
     background: var(--background-modifier-border);
     border-radius: 4px;
-    height: 20px;
+    height: 24px;
     overflow: hidden;
 }
 
@@ -38,9 +51,88 @@
     transition: width 0.3s ease;
 }
 
+/* Current URL being processed */
+.link-scraper-current-url {
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: var(--background-primary-alt);
+    border-radius: 4px;
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+    color: var(--text-accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.link-scraper-current-url:empty {
+    display: none;
+}
+
 .link-scraper-progress-status {
     margin-top: 8px;
     font-size: 0.9em;
+    color: var(--text-muted);
+}
+
+/* Log container */
+.link-scraper-log {
+    margin-top: 15px;
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--background-primary);
+}
+
+.link-scraper-log-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    font-size: 0.85em;
+}
+
+.link-scraper-log-entry:last-child {
+    border-bottom: none;
+}
+
+.link-scraper-log-icon {
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+    font-weight: bold;
+}
+
+.link-scraper-log-success .link-scraper-log-icon {
+    color: var(--color-green);
+}
+
+.link-scraper-log-failed .link-scraper-log-icon {
+    color: var(--color-red);
+}
+
+.link-scraper-log-skipped .link-scraper-log-icon {
+    color: var(--text-muted);
+}
+
+.link-scraper-log-domain {
+    flex-shrink: 0;
+    min-width: 120px;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-monospace);
+    color: var(--text-normal);
+}
+
+.link-scraper-log-message {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-muted);
 }
 
@@ -60,6 +152,15 @@
 .link-scraper-buttons button:hover {
     background: var(--interactive-accent);
     color: var(--text-on-accent);
+}
+
+.link-scraper-buttons button.mod-warning {
+    background: var(--background-modifier-error);
+    color: var(--text-on-accent);
+}
+
+.link-scraper-buttons button.mod-warning:hover {
+    background: var(--color-red);
 }
 
 /* Settings styles */

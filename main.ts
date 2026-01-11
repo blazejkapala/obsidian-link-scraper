@@ -120,6 +120,12 @@ interface ScrapedContent {
 	error?: string;
 }
 
+interface ScrapingState {
+	pendingUrls: string[];
+	stats: { success: number; failed: number; skipped: number; total: number; processed: number };
+	linksMap: [string, ExtractedLink[]][];
+}
+
 // ============== Main Plugin ==============
 export default class LinkScraperPlugin extends Plugin {
 	settings: LinkScraperSettings;
@@ -270,6 +276,21 @@ export default class LinkScraperPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+	}
+
+	// State management for pause/resume
+	private scrapingState: ScrapingState | null = null;
+
+	getSavedScrapingState(): ScrapingState | null {
+		return this.scrapingState;
+	}
+
+	saveScrapingState(state: ScrapingState) {
+		this.scrapingState = state;
+	}
+
+	clearScrapingState() {
+		this.scrapingState = null;
 	}
 
 	// Extract URLs from text
@@ -869,56 +890,6 @@ source_notes: ${JSON.stringify(sources)}
 		new Notice(`Done: ${success} scraped, ${skipped} skipped, ${failed} failed`);
 	}
 
-	// Scrape all links from vault
-	async scrapeAllLinks(
-		allLinks: Map<string, ExtractedLink[]>,
-		progressCallback?: (current: number, total: number, domain: string, status: string) => void
-	) {
-		const urls = Array.from(allLinks.keys());
-		let success = 0;
-		let failed = 0;
-		let skipped = 0;
-
-		for (let i = 0; i < urls.length; i++) {
-			const url = urls[i];
-			const domain = new URL(url).hostname;
-
-			if (progressCallback) {
-				progressCallback(i + 1, urls.length, domain, "scraping");
-			}
-
-			const content = await this.scrapeUrl(url);
-
-			// null means already scraped - skip
-			if (content === null) {
-				skipped++;
-				if (progressCallback) {
-					progressCallback(i + 1, urls.length, domain, "skipped");
-				}
-				continue;
-			}
-
-			if (content.success) {
-				success++;
-			} else {
-				failed++;
-			}
-
-			const sourceFiles = allLinks.get(url)!.map((l) => l.sourceFile);
-			const savedPath = await this.saveScrapedContent(content, sourceFiles);
-
-			if (savedPath && this.settings.addBacklinks) {
-				for (const link of allLinks.get(url)!) {
-					await this.addBacklinkToNote(link.sourceFile, savedPath, url);
-				}
-			}
-
-			// Pause
-			await new Promise((resolve) => setTimeout(resolve, 300));
-		}
-
-		return { success, failed, skipped };
-	}
 }
 
 // ============== Folder Picker Modal ==============
@@ -980,14 +951,27 @@ class FolderPickerModal extends Modal {
 class ScraperModal extends Modal {
 	plugin: LinkScraperPlugin;
 	folderPath: string | null;
+	
+	// UI elements
 	statusEl: HTMLElement;
 	progressContainer: HTMLElement;
 	progressText: HTMLElement;
-	progressBar: HTMLElement;
 	progressBarFill: HTMLElement;
 	progressStatus: HTMLElement;
+	currentUrlEl: HTMLElement;
+	statsEl: HTMLElement;
+	logContainer: HTMLElement;
 	startBtn: HTMLButtonElement;
+	pauseBtn: HTMLButtonElement;
+	cancelBtn: HTMLButtonElement;
+	
+	// State
 	isRunning = false;
+	isPaused = false;
+	isCancelled = false;
+	pendingUrls: string[] = [];
+	allLinksMap: Map<string, ExtractedLink[]> = new Map();
+	stats = { success: 0, failed: 0, skipped: 0, total: 0, processed: 0 };
 
 	constructor(app: App, plugin: LinkScraperPlugin, folderPath: string | null = null) {
 		super(app);
@@ -1000,7 +984,7 @@ class ScraperModal extends Modal {
 		contentEl.empty();
 		contentEl.addClass("link-scraper-modal");
 
-		// Title - different based on scope
+		// Title
 		const title = this.folderPath 
 			? `Scrape links from: ${this.folderPath}`
 			: "Scrape all links";
@@ -1016,12 +1000,22 @@ class ScraperModal extends Modal {
 		// Progress container
 		this.progressContainer = contentEl.createDiv({ cls: "link-scraper-progress link-scraper-hidden" });
 		
-		this.progressText = this.progressContainer.createDiv({ cls: "link-scraper-progress-text" });
+		// Progress bar section
+		const progressHeader = this.progressContainer.createDiv({ cls: "link-scraper-progress-header" });
+		this.progressText = progressHeader.createSpan({ cls: "link-scraper-progress-text" });
+		this.statsEl = progressHeader.createSpan({ cls: "link-scraper-stats" });
 		
 		const barContainer = this.progressContainer.createDiv({ cls: "link-scraper-bar-container" });
 		this.progressBarFill = barContainer.createDiv({ cls: "link-scraper-bar-fill" });
 		
+		// Current URL
+		this.currentUrlEl = this.progressContainer.createDiv({ cls: "link-scraper-current-url" });
+		
+		// Status text
 		this.progressStatus = this.progressContainer.createDiv({ cls: "link-scraper-progress-status" });
+
+		// Log container (scrollable list of processed items)
+		this.logContainer = this.progressContainer.createDiv({ cls: "link-scraper-log" });
 
 		// Buttons
 		const buttonContainer = contentEl.createDiv({ cls: "link-scraper-buttons" });
@@ -1034,56 +1028,228 @@ class ScraperModal extends Modal {
 			void this.startScraping();
 		});
 
-		const cancelBtn = buttonContainer.createEl("button", { text: "Close" });
-		cancelBtn.addEventListener("click", () => this.close());
+		this.pauseBtn = buttonContainer.createEl("button", { 
+			text: "Pause",
+			cls: "link-scraper-hidden"
+		});
+		this.pauseBtn.addEventListener("click", () => {
+			this.togglePause();
+		});
+
+		this.cancelBtn = buttonContainer.createEl("button", { 
+			text: "Cancel",
+			cls: "link-scraper-hidden mod-warning"
+		});
+		this.cancelBtn.addEventListener("click", () => {
+			this.cancelScraping();
+		});
+
+		const closeBtn = buttonContainer.createEl("button", { text: "Close" });
+		closeBtn.addEventListener("click", () => this.close());
+
+		// Check if there's saved state to resume
+		this.checkForResumableState();
+	}
+
+	checkForResumableState() {
+		const savedState = this.plugin.getSavedScrapingState();
+		if (savedState && savedState.pendingUrls.length > 0) {
+			this.statusEl.setText(
+				`Found interrupted session: ${savedState.pendingUrls.length} URLs remaining. Click Resume to continue.`
+			);
+			this.startBtn.setText("Resume");
+			this.pendingUrls = savedState.pendingUrls;
+			this.stats = savedState.stats;
+			this.allLinksMap = new Map(savedState.linksMap);
+		}
+	}
+
+	togglePause() {
+		this.isPaused = !this.isPaused;
+		if (this.isPaused) {
+			this.pauseBtn.setText("Resume");
+			this.progressStatus.setText("Paused - click Resume to continue");
+			// Save state when paused
+			this.plugin.saveScrapingState({
+				pendingUrls: this.pendingUrls,
+				stats: this.stats,
+				linksMap: Array.from(this.allLinksMap.entries())
+			});
+		} else {
+			this.pauseBtn.setText("Pause");
+			this.progressStatus.setText("Resuming...");
+		}
+	}
+
+	cancelScraping() {
+		this.isCancelled = true;
+		this.isPaused = false;
+		this.progressStatus.setText("Cancelling...");
+		// Save state for later resume
+		this.plugin.saveScrapingState({
+			pendingUrls: this.pendingUrls,
+			stats: this.stats,
+			linksMap: Array.from(this.allLinksMap.entries())
+		});
+	}
+
+	addLogEntry(url: string, status: "success" | "failed" | "skipped", message: string) {
+		const entry = this.logContainer.createDiv({ cls: `link-scraper-log-entry link-scraper-log-${status}` });
+		
+		const icon = status === "success" ? "✓" : status === "failed" ? "✗" : "⊘";
+		entry.createSpan({ text: icon, cls: "link-scraper-log-icon" });
+		
+		try {
+			const domain = new URL(url).hostname;
+			entry.createSpan({ text: domain, cls: "link-scraper-log-domain" });
+		} catch {
+			entry.createSpan({ text: url.substring(0, 30), cls: "link-scraper-log-domain" });
+		}
+		
+		entry.createSpan({ text: message, cls: "link-scraper-log-message" });
+		
+		// Auto-scroll to bottom
+		this.logContainer.scrollTop = this.logContainer.scrollHeight;
+		
+		// Keep only last 50 entries
+		while (this.logContainer.children.length > 50) {
+			this.logContainer.firstChild?.remove();
+		}
+	}
+
+	updateProgress() {
+		const percent = this.stats.total > 0 
+			? Math.round((this.stats.processed / this.stats.total) * 100) 
+			: 0;
+		
+		this.progressText.setText(`${this.stats.processed}/${this.stats.total} (${percent}%)`);
+		this.progressBarFill.style.width = `${percent}%`;
+		this.statsEl.setText(
+			`✓ ${this.stats.success} | ✗ ${this.stats.failed} | ⊘ ${this.stats.skipped}`
+		);
 	}
 
 	async startScraping() {
 		if (this.isRunning) return;
+		
 		this.isRunning = true;
-		this.startBtn.disabled = true;
-
-		const scopeText = this.folderPath ? `folder "${this.folderPath}"` : "vault";
-		this.statusEl.setText(`Scanning ${scopeText}...`);
+		this.isPaused = false;
+		this.isCancelled = false;
+		
+		// Update UI
+		this.startBtn.addClass("link-scraper-hidden");
+		this.pauseBtn.removeClass("link-scraper-hidden");
+		this.cancelBtn.removeClass("link-scraper-hidden");
 		this.progressContainer.removeClass("link-scraper-hidden");
 
-		const allLinks = await this.plugin.scanVaultForLinks(this.folderPath);
-		const totalLinks = allLinks.size;
+		// If no pending URLs, scan vault first
+		if (this.pendingUrls.length === 0) {
+			const scopeText = this.folderPath ? `folder "${this.folderPath}"` : "vault";
+			this.statusEl.setText(`Scanning ${scopeText}...`);
 
-		if (totalLinks === 0) {
-			this.statusEl.setText(`No links found in the ${scopeText}.`);
-			this.isRunning = false;
-			this.startBtn.disabled = false;
-			return;
+			this.allLinksMap = await this.plugin.scanVaultForLinks(this.folderPath);
+			this.pendingUrls = Array.from(this.allLinksMap.keys());
+			this.stats = { success: 0, failed: 0, skipped: 0, total: this.pendingUrls.length, processed: 0 };
+
+			if (this.pendingUrls.length === 0) {
+				this.statusEl.setText(`No links found in the ${scopeText}.`);
+				this.finishScraping("No links to process");
+				return;
+			}
 		}
 
-		this.statusEl.setText(`Found ${totalLinks} unique links, scraping...`);
+		this.statusEl.setText(`Scraping ${this.stats.total} links...`);
+		this.updateProgress();
 
-		const result = await this.plugin.scrapeAllLinks(
-			allLinks,
-			(current, total, domain, status) => {
-				const percent = Math.round((current / total) * 100);
-				const statusLabel = status === "skipped" ? "Skipped" : "Processing";
-				
-				this.progressText.setText(`${current}/${total} (${percent}%)`);
-				this.progressBarFill.style.width = `${percent}%`;
-				this.progressStatus.setText(`${statusLabel}: ${domain}`);
+		// Process URLs
+		while (this.pendingUrls.length > 0 && !this.isCancelled) {
+			// Wait while paused
+			while (this.isPaused && !this.isCancelled) {
+				await new Promise(resolve => setTimeout(resolve, 200));
 			}
-		);
+			
+			if (this.isCancelled) break;
 
-		this.statusEl.setText(
-			`Done: ${result.success} scraped, ${result.skipped} skipped, ${result.failed} failed`
-		);
-		
-		this.progressText.setText("Complete");
-		this.progressStatus.setText(`Files saved in: ${this.plugin.settings.outputFolder}/`);
+			const url = this.pendingUrls.shift()!;
+			this.stats.processed++;
 
+			try {
+				const domain = new URL(url).hostname;
+				this.currentUrlEl.setText(`Processing: ${domain}`);
+			} catch {
+				this.currentUrlEl.setText(`Processing: ${url.substring(0, 50)}...`);
+			}
+
+			const content = await this.plugin.scrapeUrl(url);
+
+			if (content === null) {
+				// Already scraped
+				this.stats.skipped++;
+				this.addLogEntry(url, "skipped", "Already scraped");
+			} else if (content.success) {
+				this.stats.success++;
+				const sourceFiles = this.allLinksMap.get(url)?.map(l => l.sourceFile) || [];
+				const savedPath = await this.plugin.saveScrapedContent(content, sourceFiles);
+				
+				if (savedPath && this.plugin.settings.addBacklinks) {
+					for (const link of this.allLinksMap.get(url) || []) {
+						await this.plugin.addBacklinkToNote(link.sourceFile, savedPath, url);
+					}
+				}
+				this.addLogEntry(url, "success", content.title?.substring(0, 30) || "OK");
+			} else {
+				this.stats.failed++;
+				this.addLogEntry(url, "failed", content.error?.substring(0, 30) || "Error");
+			}
+
+			this.updateProgress();
+			
+			// Small pause between requests
+			await new Promise(resolve => setTimeout(resolve, 300));
+		}
+
+		// Finish
+		if (this.isCancelled) {
+			this.finishScraping(`Cancelled. ${this.pendingUrls.length} URLs remaining - click Resume to continue.`);
+		} else {
+			// Clear saved state on successful completion
+			this.plugin.clearScrapingState();
+			this.finishScraping(
+				`Done: ${this.stats.success} scraped, ${this.stats.skipped} skipped, ${this.stats.failed} failed`
+			);
+		}
+	}
+
+	finishScraping(message: string) {
 		this.isRunning = false;
-		this.startBtn.disabled = false;
-		this.startBtn.setText("Run again");
+		this.statusEl.setText(message);
+		this.currentUrlEl.setText("");
+		this.progressStatus.setText(`Files saved in: ${this.plugin.settings.outputFolder}/`);
+		
+		this.startBtn.removeClass("link-scraper-hidden");
+		this.pauseBtn.addClass("link-scraper-hidden");
+		this.cancelBtn.addClass("link-scraper-hidden");
+		
+		if (this.pendingUrls.length > 0) {
+			this.startBtn.setText("Resume");
+		} else {
+			this.startBtn.setText("Run again");
+			this.pendingUrls = [];
+			this.stats = { success: 0, failed: 0, skipped: 0, total: 0, processed: 0 };
+		}
 	}
 
 	onClose() {
+		// Save state if scraping was interrupted
+		if (this.isRunning && this.pendingUrls.length > 0) {
+			this.plugin.saveScrapingState({
+				pendingUrls: this.pendingUrls,
+				stats: this.stats,
+				linksMap: Array.from(this.allLinksMap.entries())
+			});
+		}
+		
+		this.isCancelled = true;
 		const { contentEl } = this;
 		contentEl.empty();
 	}
