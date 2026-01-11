@@ -363,31 +363,42 @@ export default class LinkScraperPlugin extends Plugin {
 
 			// Content - remove unnecessary elements
 			const elementsToRemove = doc.querySelectorAll(
-				"script, style, nav, footer, header, aside, noscript, iframe, svg"
+				"script, style, nav, footer, header, aside, noscript, iframe, svg, form, [role='navigation'], .sidebar, .widget, .comments, .advertisement, .ad, .menu, .nav"
 			);
 			elementsToRemove.forEach((el) => el.remove());
 
-			// Find main content
+			// Find main content - improved selectors for WordPress, Elementor, and common CMSs
 			const mainElement =
-				doc.querySelector("main") ||
+				doc.querySelector("article .entry-content") ||
+				doc.querySelector("article .post-content") ||
+				doc.querySelector(".entry-content") ||
+				doc.querySelector(".post-content") ||
+				doc.querySelector(".article-content") ||
+				doc.querySelector(".page-content") ||
+				doc.querySelector('[itemprop="articleBody"]') ||
+				doc.querySelector("main article") ||
 				doc.querySelector("article") ||
-				doc.querySelector('[class*="content"]') ||
-				doc.querySelector('[id*="content"]') ||
+				doc.querySelector("main") ||
+				doc.querySelector('[role="main"]') ||
+				doc.querySelector(".elementor-widget-theme-post-content") ||
+				doc.querySelector(".elementor-section") ||
+				doc.querySelector('[class*="content"]:not([class*="sidebar"])') ||
+				doc.querySelector('[id*="content"]:not([id*="sidebar"])') ||
 				doc.body;
 
 			let content = "";
 			if (mainElement) {
 				content = mainElement.textContent || "";
-				// Clean up
+				// Clean up whitespace
 				content = content
 					.split("\n")
 					.map((line) => line.trim())
 					.filter((line) => line.length > 2)
-					.slice(0, 150)
 					.join("\n\n");
 
-				if (content.length > 15000) {
-					content = content.substring(0, 15000) + "\n\n[... content truncated ...]";
+				// Limit by characters, not lines (30000 chars ~ 5000-6000 words)
+				if (content.length > 30000) {
+					content = content.substring(0, 30000) + "\n\n[... content truncated ...]";
 				}
 			}
 

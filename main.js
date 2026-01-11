@@ -267,16 +267,16 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
         description = (ogDesc == null ? void 0 : ogDesc.getAttribute("content")) || "";
       }
       const elementsToRemove = doc.querySelectorAll(
-        "script, style, nav, footer, header, aside, noscript, iframe, svg"
+        "script, style, nav, footer, header, aside, noscript, iframe, svg, form, [role='navigation'], .sidebar, .widget, .comments, .advertisement, .ad, .menu, .nav"
       );
       elementsToRemove.forEach((el) => el.remove());
-      const mainElement = doc.querySelector("main") || doc.querySelector("article") || doc.querySelector('[class*="content"]') || doc.querySelector('[id*="content"]') || doc.body;
+      const mainElement = doc.querySelector("article .entry-content") || doc.querySelector("article .post-content") || doc.querySelector(".entry-content") || doc.querySelector(".post-content") || doc.querySelector(".article-content") || doc.querySelector(".page-content") || doc.querySelector('[itemprop="articleBody"]') || doc.querySelector("main article") || doc.querySelector("article") || doc.querySelector("main") || doc.querySelector('[role="main"]') || doc.querySelector(".elementor-widget-theme-post-content") || doc.querySelector(".elementor-section") || doc.querySelector('[class*="content"]:not([class*="sidebar"])') || doc.querySelector('[id*="content"]:not([id*="sidebar"])') || doc.body;
       let content = "";
       if (mainElement) {
         content = mainElement.textContent || "";
-        content = content.split("\n").map((line) => line.trim()).filter((line) => line.length > 2).slice(0, 150).join("\n\n");
-        if (content.length > 15e3) {
-          content = content.substring(0, 15e3) + "\n\n[... content truncated ...]";
+        content = content.split("\n").map((line) => line.trim()).filter((line) => line.length > 2).join("\n\n");
+        if (content.length > 3e4) {
+          content = content.substring(0, 3e4) + "\n\n[... content truncated ...]";
         }
       }
       return {
