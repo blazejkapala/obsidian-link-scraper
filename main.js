@@ -267,17 +267,52 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
         description = (ogDesc == null ? void 0 : ogDesc.getAttribute("content")) || "";
       }
       const elementsToRemove = doc.querySelectorAll(
-        "script, style, nav, footer, header, aside, noscript, iframe, svg, form, [role='navigation'], .sidebar, .widget, .comments, .advertisement, .ad, .menu, .nav"
+        "script, style, nav, footer, header, aside, noscript, iframe, svg, form, [role='navigation'], .sidebar, .widget, .comments, .advertisement, .ad, .menu, .nav, .navigation, .breadcrumb, .related-posts, .share-buttons, .social-share"
       );
       elementsToRemove.forEach((el) => el.remove());
-      const mainElement = doc.querySelector("article .entry-content") || doc.querySelector("article .post-content") || doc.querySelector(".entry-content") || doc.querySelector(".post-content") || doc.querySelector(".article-content") || doc.querySelector(".page-content") || doc.querySelector('[itemprop="articleBody"]') || doc.querySelector("main article") || doc.querySelector("article") || doc.querySelector("main") || doc.querySelector('[role="main"]') || doc.querySelector(".elementor-widget-theme-post-content") || doc.querySelector(".elementor-section") || doc.querySelector('[class*="content"]:not([class*="sidebar"])') || doc.querySelector('[id*="content"]:not([id*="sidebar"])') || doc.body;
+      const extractText = (el) => {
+        if (!el)
+          return "";
+        let text = el.textContent || "";
+        return text.split("\n").map((line) => line.trim()).filter((line) => line.length > 2).join("\n\n");
+      };
+      const selectors = [
+        "article .entry-content",
+        "article .post-content",
+        ".entry-content",
+        ".post-content",
+        ".article-content",
+        ".page-content",
+        '[itemprop="articleBody"]',
+        ".elementor-widget-theme-post-content",
+        "main article",
+        "article",
+        "main",
+        '[role="main"]',
+        ".elementor-section",
+        '[class*="content"]:not([class*="sidebar"]):not([class*="header"]):not([class*="footer"])'
+      ];
       let content = "";
-      if (mainElement) {
-        content = mainElement.textContent || "";
-        content = content.split("\n").map((line) => line.trim()).filter((line) => line.length > 2).join("\n\n");
-        if (content.length > 3e4) {
-          content = content.substring(0, 3e4) + "\n\n[... content truncated ...]";
+      let maxLength = 0;
+      for (const selector of selectors) {
+        try {
+          const el = doc.querySelector(selector);
+          const text = extractText(el);
+          if (text.length > maxLength) {
+            maxLength = text.length;
+            content = text;
+          }
+        } catch (e) {
         }
+      }
+      if (content.length < 500) {
+        const bodyText = extractText(doc.body);
+        if (bodyText.length > content.length) {
+          content = bodyText;
+        }
+      }
+      if (content.length > 5e4) {
+        content = content.substring(0, 5e4) + "\n\n[... content truncated ...]";
       }
       return {
         url,

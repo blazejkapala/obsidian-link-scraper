@@ -363,43 +363,67 @@ export default class LinkScraperPlugin extends Plugin {
 
 			// Content - remove unnecessary elements
 			const elementsToRemove = doc.querySelectorAll(
-				"script, style, nav, footer, header, aside, noscript, iframe, svg, form, [role='navigation'], .sidebar, .widget, .comments, .advertisement, .ad, .menu, .nav"
+				"script, style, nav, footer, header, aside, noscript, iframe, svg, form, [role='navigation'], .sidebar, .widget, .comments, .advertisement, .ad, .menu, .nav, .navigation, .breadcrumb, .related-posts, .share-buttons, .social-share"
 			);
 			elementsToRemove.forEach((el) => el.remove());
 
-			// Find main content - improved selectors for WordPress, Elementor, and common CMSs
-			const mainElement =
-				doc.querySelector("article .entry-content") ||
-				doc.querySelector("article .post-content") ||
-				doc.querySelector(".entry-content") ||
-				doc.querySelector(".post-content") ||
-				doc.querySelector(".article-content") ||
-				doc.querySelector(".page-content") ||
-				doc.querySelector('[itemprop="articleBody"]') ||
-				doc.querySelector("main article") ||
-				doc.querySelector("article") ||
-				doc.querySelector("main") ||
-				doc.querySelector('[role="main"]') ||
-				doc.querySelector(".elementor-widget-theme-post-content") ||
-				doc.querySelector(".elementor-section") ||
-				doc.querySelector('[class*="content"]:not([class*="sidebar"])') ||
-				doc.querySelector('[id*="content"]:not([id*="sidebar"])') ||
-				doc.body;
-
-			let content = "";
-			if (mainElement) {
-				content = mainElement.textContent || "";
-				// Clean up whitespace
-				content = content
+			// Helper function to extract and clean text from element
+			const extractText = (el: Element | null): string => {
+				if (!el) return "";
+				let text = el.textContent || "";
+				return text
 					.split("\n")
 					.map((line) => line.trim())
 					.filter((line) => line.length > 2)
 					.join("\n\n");
+			};
 
-				// Limit by characters, not lines (30000 chars ~ 5000-6000 words)
-				if (content.length > 30000) {
-					content = content.substring(0, 30000) + "\n\n[... content truncated ...]";
+			// Try multiple selectors and pick the one with most content
+			const selectors = [
+				"article .entry-content",
+				"article .post-content",
+				".entry-content",
+				".post-content",
+				".article-content",
+				".page-content",
+				'[itemprop="articleBody"]',
+				".elementor-widget-theme-post-content",
+				"main article",
+				"article",
+				"main",
+				'[role="main"]',
+				".elementor-section",
+				'[class*="content"]:not([class*="sidebar"]):not([class*="header"]):not([class*="footer"])',
+			];
+
+			let content = "";
+			let maxLength = 0;
+
+			// First pass: try specific content selectors
+			for (const selector of selectors) {
+				try {
+					const el = doc.querySelector(selector);
+					const text = extractText(el);
+					if (text.length > maxLength) {
+						maxLength = text.length;
+						content = text;
+					}
+				} catch {
+					// Skip invalid selectors
 				}
+			}
+
+			// If content is too short (less than 500 chars), fall back to body
+			if (content.length < 500) {
+				const bodyText = extractText(doc.body);
+				if (bodyText.length > content.length) {
+					content = bodyText;
+				}
+			}
+
+			// Limit by characters (50000 chars ~ 8000-10000 words)
+			if (content.length > 50000) {
+				content = content.substring(0, 50000) + "\n\n[... content truncated ...]";
 			}
 
 			return {
