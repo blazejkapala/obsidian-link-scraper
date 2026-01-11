@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-link-scraper",
-	"version": "0.4.0",
+	"version": "0.5.0",
 	"description": "Obsidian plugin to scrape content from links in notes",
 	"main": "main.js",
 	"scripts": {
