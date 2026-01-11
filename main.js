@@ -159,8 +159,19 @@ var BackgroundScrapingManager = class {
     }
     return false;
   }
+  // Start with pre-defined URLs (for single note scraping)
+  async startWithUrls(urls, sourceFile) {
+    if (this.isRunning)
+      return;
+    this.reset();
+    this.pendingUrls = [...urls];
+    this.stats = { success: 0, failed: 0, skipped: 0, total: urls.length, processed: 0 };
+    for (const url of urls) {
+      this.allLinksMap.set(url, [{ url, sourceFile }]);
+    }
+    await this.runScraping();
+  }
   async start(folderPath = null) {
-    var _a, _b, _c;
     if (this.isRunning)
       return;
     this.isRunning = true;
@@ -178,6 +189,16 @@ var BackgroundScrapingManager = class {
         return;
       }
     }
+    this.notifyListeners();
+    await this.runScraping();
+  }
+  async runScraping() {
+    var _a, _b, _c;
+    this.isRunning = true;
+    this.isPaused = false;
+    this.isCancelled = false;
+    this.logEntries = [];
+    this.updateStatusBar();
     this.notifyListeners();
     while (this.pendingUrls.length > 0 && !this.isCancelled) {
       while (this.isPaused && !this.isCancelled) {
@@ -246,7 +267,7 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
     this.statusBarEl.addClass("link-scraper-statusbar");
     this.statusBarEl.hide();
     this.statusBarEl.onClickEvent(() => {
-      new ScraperModal(this.app, this, null, true).open();
+      new ScraperModal(this.app, this, { isReattaching: true }).open();
     });
     this.backgroundManager.statusBarEl = this.statusBarEl;
     this.addRibbonIcon("link", "Link scraper", (evt) => {
@@ -255,7 +276,7 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
         const statusText = this.backgroundManager.isPaused ? "paused" : "running";
         const percent = this.backgroundManager.stats.total > 0 ? Math.round(this.backgroundManager.stats.processed / this.backgroundManager.stats.total * 100) : 0;
         menu.addItem(
-          (item) => item.setTitle(`View progress (${percent}% - ${statusText})`).setIcon("activity").onClick(() => new ScraperModal(this.app, this, null, true).open())
+          (item) => item.setTitle(`View progress (${percent}% - ${statusText})`).setIcon("activity").onClick(() => new ScraperModal(this.app, this, { isReattaching: true }).open())
         );
         menu.addSeparator();
       }
@@ -266,7 +287,7 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
         (item) => item.setTitle("Scrape folder...").setIcon("folder").onClick(() => new FolderPickerModal(this.app, this).open())
       );
       menu.addItem(
-        (item) => item.setTitle("Scrape all links in vault").setIcon("vault").onClick(() => new ScraperModal(this.app, this).open())
+        (item) => item.setTitle("Scrape all links in vault").setIcon("vault").onClick(() => new ScraperModal(this.app, this, {}).open())
       );
       menu.addSeparator();
       menu.addItem(
@@ -288,15 +309,18 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
                 return;
               }
               const urls = [...new Set(links.map((l) => l.url))];
-              new import_obsidian.Notice(`Found ${urls.length} links, scraping...`);
-              await this.scrapeUrls(urls, file.path);
+              new ScraperModal(this.app, this, {
+                preloadedUrls: urls,
+                sourceFile: file.path,
+                title: `Scrape links from: ${file.basename}`
+              }).open();
             });
           });
         }
         if (file instanceof import_obsidian.TFolder) {
           menu.addItem((item) => {
             item.setTitle("Scrape links from this folder").setIcon("link").onClick(() => {
-              new ScraperModal(this.app, this, file.path).open();
+              new ScraperModal(this.app, this, { folderPath: file.path }).open();
             });
           });
         }
@@ -328,7 +352,7 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
       id: "scrape-all-links",
       name: "Scrape all links from vault",
       callback: () => {
-        new ScraperModal(this.app, this).open();
+        new ScraperModal(this.app, this, {}).open();
       }
     });
     this.addCommand({
@@ -351,7 +375,7 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
       name: "View scraping progress",
       callback: () => {
         if (this.backgroundManager.isRunning || this.backgroundManager.pendingUrls.length > 0) {
-          new ScraperModal(this.app, this, null, true).open();
+          new ScraperModal(this.app, this, { isReattaching: true }).open();
         } else {
           new import_obsidian.Notice("No scraping in progress");
         }
@@ -459,8 +483,11 @@ var LinkScraperPlugin = class extends import_obsidian.Plugin {
       return;
     }
     const urls = [...new Set(links.map((l) => l.url))];
-    new import_obsidian.Notice(`Found ${urls.length} links, scraping...`);
-    await this.scrapeUrls(urls, activeFile.path);
+    new ScraperModal(this.app, this, {
+      preloadedUrls: urls,
+      sourceFile: activeFile.path,
+      title: `Scrape links from: ${activeFile.basename}`
+    }).open();
   }
   // Check if domain should be skipped
   shouldSkipDomain(url) {
@@ -866,7 +893,7 @@ var FolderPickerModal = class extends import_obsidian.Modal {
       folderItem.createSpan({ text: folder.path || "/ (root)" });
       folderItem.addEventListener("click", () => {
         this.close();
-        new ScraperModal(this.app, this.plugin, folder.path).open();
+        new ScraperModal(this.app, this.plugin, { folderPath: folder.path }).open();
       });
     }
     const buttonContainer = contentEl.createDiv({ cls: "link-scraper-buttons" });
@@ -879,14 +906,18 @@ var FolderPickerModal = class extends import_obsidian.Modal {
   }
 };
 var ScraperModal = class extends import_obsidian.Modal {
-  constructor(app, plugin, folderPath = null, isReattaching = false) {
+  constructor(app, plugin, options = {}) {
+    var _a, _b, _c, _d, _e;
     super(app);
     // Subscription cleanup
     this.unsubscribe = null;
     this.lastLogCount = 0;
     this.plugin = plugin;
-    this.folderPath = folderPath;
-    this.isReattaching = isReattaching;
+    this.folderPath = (_a = options.folderPath) != null ? _a : null;
+    this.isReattaching = (_b = options.isReattaching) != null ? _b : false;
+    this.preloadedUrls = (_c = options.preloadedUrls) != null ? _c : null;
+    this.sourceFile = (_d = options.sourceFile) != null ? _d : null;
+    this.customTitle = (_e = options.title) != null ? _e : null;
   }
   get manager() {
     return this.plugin.backgroundManager;
@@ -895,11 +926,21 @@ var ScraperModal = class extends import_obsidian.Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("link-scraper-modal");
-    const title = this.folderPath ? `Scrape links from: ${this.folderPath}` : "Scrape all links";
+    let title;
+    let statusText;
+    if (this.customTitle) {
+      title = this.customTitle;
+      statusText = this.preloadedUrls ? `Found ${this.preloadedUrls.length} links. Click start to scrape.` : "Click start to scrape.";
+    } else if (this.folderPath) {
+      title = `Scrape links from: ${this.folderPath}`;
+      statusText = `Click start to scan folder "${this.folderPath}" and scrape all links.`;
+    } else {
+      title = "Scrape all links";
+      statusText = "Click start to scan the vault and scrape all links.";
+    }
     new import_obsidian.Setting(contentEl).setName(title).setHeading();
-    const scopeText = this.folderPath ? `folder "${this.folderPath}"` : "vault";
     this.statusEl = contentEl.createEl("p", {
-      text: `Click start to scan the ${scopeText} and scrape all links.`,
+      text: statusText,
       cls: "link-scraper-status"
     });
     this.progressContainer = contentEl.createDiv({ cls: "link-scraper-progress link-scraper-hidden" });
@@ -1046,8 +1087,13 @@ var ScraperModal = class extends import_obsidian.Modal {
       this.lastLogCount = 0;
     }
     this.showRunningUI();
-    this.statusEl.setText("Scanning vault...");
-    void this.manager.start(this.folderPath);
+    if (this.preloadedUrls && this.preloadedUrls.length > 0 && this.sourceFile) {
+      this.statusEl.setText(`Scraping ${this.preloadedUrls.length} links...`);
+      void this.manager.startWithUrls(this.preloadedUrls, this.sourceFile);
+    } else {
+      this.statusEl.setText("Scanning...");
+      void this.manager.start(this.folderPath);
+    }
   }
   onClose() {
     if (this.unsubscribe) {

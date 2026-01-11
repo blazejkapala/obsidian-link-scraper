@@ -239,6 +239,22 @@ class BackgroundScrapingManager {
 		return false;
 	}
 
+	// Start with pre-defined URLs (for single note scraping)
+	async startWithUrls(urls: string[], sourceFile: string) {
+		if (this.isRunning) return;
+		
+		this.reset();
+		this.pendingUrls = [...urls];
+		this.stats = { success: 0, failed: 0, skipped: 0, total: urls.length, processed: 0 };
+		
+		// Map all URLs to the source file
+		for (const url of urls) {
+			this.allLinksMap.set(url, [{ url, sourceFile }]);
+		}
+		
+		await this.runScraping();
+	}
+
 	async start(folderPath: string | null = null) {
 		if (this.isRunning) return;
 		
@@ -261,6 +277,16 @@ class BackgroundScrapingManager {
 			}
 		}
 
+		this.notifyListeners();
+		await this.runScraping();
+	}
+
+	async runScraping() {
+		this.isRunning = true;
+		this.isPaused = false;
+		this.isCancelled = false;
+		this.logEntries = [];
+		this.updateStatusBar();
 		this.notifyListeners();
 
 		// Process URLs
@@ -350,7 +376,7 @@ export default class LinkScraperPlugin extends Plugin {
 		this.statusBarEl.addClass("link-scraper-statusbar");
 		this.statusBarEl.hide();
 		this.statusBarEl.onClickEvent(() => {
-			new ScraperModal(this.app, this, null, true).open();
+			new ScraperModal(this.app, this, { isReattaching: true }).open();
 		});
 		this.backgroundManager.statusBarEl = this.statusBarEl;
 
@@ -369,7 +395,7 @@ export default class LinkScraperPlugin extends Plugin {
 					item
 						.setTitle(`View progress (${percent}% - ${statusText})`)
 						.setIcon("activity")
-						.onClick(() => new ScraperModal(this.app, this, null, true).open())
+						.onClick(() => new ScraperModal(this.app, this, { isReattaching: true }).open())
 				);
 				
 				menu.addSeparator();
@@ -393,7 +419,7 @@ export default class LinkScraperPlugin extends Plugin {
 				item
 					.setTitle("Scrape all links in vault")
 					.setIcon("vault")
-					.onClick(() => new ScraperModal(this.app, this).open())
+					.onClick(() => new ScraperModal(this.app, this, {}).open())
 			);
 
 			menu.addSeparator();
@@ -429,8 +455,11 @@ export default class LinkScraperPlugin extends Plugin {
 									return;
 								}
 								const urls = [...new Set(links.map((l) => l.url))];
-								new Notice(`Found ${urls.length} links, scraping...`);
-								await this.scrapeUrls(urls, file.path);
+								new ScraperModal(this.app, this, {
+									preloadedUrls: urls,
+									sourceFile: file.path,
+									title: `Scrape links from: ${file.basename}`
+								}).open();
 							});
 					});
 				}
@@ -442,7 +471,7 @@ export default class LinkScraperPlugin extends Plugin {
 							.setTitle("Scrape links from this folder")
 							.setIcon("link")
 							.onClick(() => {
-								new ScraperModal(this.app, this, file.path).open();
+								new ScraperModal(this.app, this, { folderPath: file.path }).open();
 							});
 					});
 				}
@@ -484,7 +513,7 @@ export default class LinkScraperPlugin extends Plugin {
 			id: "scrape-all-links",
 			name: "Scrape all links from vault",
 			callback: () => {
-				new ScraperModal(this.app, this).open();
+				new ScraperModal(this.app, this, {}).open();
 			},
 		});
 
@@ -510,7 +539,7 @@ export default class LinkScraperPlugin extends Plugin {
 			name: "View scraping progress",
 			callback: () => {
 				if (this.backgroundManager.isRunning || this.backgroundManager.pendingUrls.length > 0) {
-					new ScraperModal(this.app, this, null, true).open();
+					new ScraperModal(this.app, this, { isReattaching: true }).open();
 				} else {
 					new Notice("No scraping in progress");
 				}
@@ -664,9 +693,13 @@ export default class LinkScraperPlugin extends Plugin {
 		}
 
 		const urls = [...new Set(links.map((l) => l.url))];
-		new Notice(`Found ${urls.length} links, scraping...`);
-
-		await this.scrapeUrls(urls, activeFile.path);
+		
+		// Open modal with preloaded URLs
+		new ScraperModal(this.app, this, {
+			preloadedUrls: urls,
+			sourceFile: activeFile.path,
+			title: `Scrape links from: ${activeFile.basename}`
+		}).open();
 	}
 
 	// Check if domain should be skipped
@@ -1182,7 +1215,7 @@ class FolderPickerModal extends Modal {
 			folderItem.createSpan({ text: folder.path || "/ (root)" });
 			folderItem.addEventListener("click", () => {
 				this.close();
-				new ScraperModal(this.app, this.plugin, folder.path).open();
+				new ScraperModal(this.app, this.plugin, { folderPath: folder.path }).open();
 			});
 		}
 
@@ -1199,10 +1232,21 @@ class FolderPickerModal extends Modal {
 }
 
 // ============== Progress Modal ==============
+interface ScraperModalOptions {
+	folderPath?: string | null;
+	isReattaching?: boolean;
+	preloadedUrls?: string[];
+	sourceFile?: string;
+	title?: string;
+}
+
 class ScraperModal extends Modal {
 	plugin: LinkScraperPlugin;
 	folderPath: string | null;
 	isReattaching: boolean;
+	preloadedUrls: string[] | null;
+	sourceFile: string | null;
+	customTitle: string | null;
 	
 	// UI elements
 	statusEl: HTMLElement;
@@ -1222,11 +1266,14 @@ class ScraperModal extends Modal {
 	unsubscribe: (() => void) | null = null;
 	lastLogCount = 0;
 
-	constructor(app: App, plugin: LinkScraperPlugin, folderPath: string | null = null, isReattaching = false) {
+	constructor(app: App, plugin: LinkScraperPlugin, options: ScraperModalOptions = {}) {
 		super(app);
 		this.plugin = plugin;
-		this.folderPath = folderPath;
-		this.isReattaching = isReattaching;
+		this.folderPath = options.folderPath ?? null;
+		this.isReattaching = options.isReattaching ?? false;
+		this.preloadedUrls = options.preloadedUrls ?? null;
+		this.sourceFile = options.sourceFile ?? null;
+		this.customTitle = options.title ?? null;
 	}
 
 	get manager(): BackgroundScrapingManager {
@@ -1239,15 +1286,27 @@ class ScraperModal extends Modal {
 		contentEl.addClass("link-scraper-modal");
 
 		// Title
-		const title = this.folderPath 
-			? `Scrape links from: ${this.folderPath}`
-			: "Scrape all links";
+		let title: string;
+		let statusText: string;
+		
+		if (this.customTitle) {
+			title = this.customTitle;
+			statusText = this.preloadedUrls 
+				? `Found ${this.preloadedUrls.length} links. Click start to scrape.`
+				: "Click start to scrape.";
+		} else if (this.folderPath) {
+			title = `Scrape links from: ${this.folderPath}`;
+			statusText = `Click start to scan folder "${this.folderPath}" and scrape all links.`;
+		} else {
+			title = "Scrape all links";
+			statusText = "Click start to scan the vault and scrape all links.";
+		}
+		
 		new Setting(contentEl).setName(title).setHeading();
 
 		// Status
-		const scopeText = this.folderPath ? `folder "${this.folderPath}"` : "vault";
 		this.statusEl = contentEl.createEl("p", {
-			text: `Click start to scan the ${scopeText} and scrape all links.`,
+			text: statusText,
 			cls: "link-scraper-status"
 		});
 
@@ -1447,10 +1506,15 @@ class ScraperModal extends Modal {
 		
 		// Show running UI
 		this.showRunningUI();
-		this.statusEl.setText("Scanning vault...");
 
-		// Start in background
-		void this.manager.start(this.folderPath);
+		// Start with preloaded URLs or scan vault/folder
+		if (this.preloadedUrls && this.preloadedUrls.length > 0 && this.sourceFile) {
+			this.statusEl.setText(`Scraping ${this.preloadedUrls.length} links...`);
+			void this.manager.startWithUrls(this.preloadedUrls, this.sourceFile);
+		} else {
+			this.statusEl.setText("Scanning...");
+			void this.manager.start(this.folderPath);
+		}
 	}
 
 	onClose() {
