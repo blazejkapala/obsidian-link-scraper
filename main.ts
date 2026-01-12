@@ -11,7 +11,6 @@ import {
 	Menu,
 	AbstractInputSuggest,
 	TAbstractFile,
-	setIcon,
 } from "obsidian";
 
 // ============== Folder Suggester ==============
@@ -1510,10 +1509,10 @@ class ScraperModal extends Modal {
 		// Start with preloaded URLs or scan vault/folder
 		if (this.preloadedUrls && this.preloadedUrls.length > 0 && this.sourceFile) {
 			this.statusEl.setText(`Scraping ${this.preloadedUrls.length} links...`);
-			void this.manager.startWithUrls(this.preloadedUrls, this.sourceFile);
+			await this.manager.startWithUrls(this.preloadedUrls, this.sourceFile);
 		} else {
 			this.statusEl.setText("Scanning...");
-			void this.manager.start(this.folderPath);
+			await this.manager.start(this.folderPath);
 		}
 	}
 
@@ -1555,7 +1554,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 			.setDesc("Folder where scraped content will be saved (also excluded from scanning)")
 			.addText((text) => {
 				text
-					.setPlaceholder("scraped-links")
+					.setPlaceholder("Scraped-links")
 					.setValue(this.plugin.settings.outputFolder)
 					.onChange(async (value) => {
 						this.plugin.settings.outputFolder = value || "scraped-links";
@@ -1569,7 +1568,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 			.setDesc("Only scan these folders (comma-separated, empty = all). Start typing to see suggestions.")
 			.addText((text) => {
 				text
-					.setPlaceholder("Notes, Projects, Archive")
+					.setPlaceholder("Notes, projects, archive")
 					.setValue(this.plugin.settings.includeFolders)
 					.onChange(async (value) => {
 						this.plugin.settings.includeFolders = value;
@@ -1584,7 +1583,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 			.setDesc("Skip these folders (comma-separated). Output folder is always excluded.")
 			.addText((text) => {
 				text
-					.setPlaceholder("Templates, Daily Notes")
+					.setPlaceholder("Templates, daily notes")
 					.setValue(this.plugin.settings.excludeFolders)
 					.onChange(async (value) => {
 						this.plugin.settings.excludeFolders = value;
@@ -1614,7 +1613,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 			.setDesc("Text displayed for backlink (e.g. 'scraped', '📥', 'archived')")
 			.addText((text) =>
 				text
-					.setPlaceholder("scraped")
+					.setPlaceholder("Scraped")
 					.setValue(this.plugin.settings.backlinkText)
 					.onChange(async (value) => {
 						this.plugin.settings.backlinkText = value || "scraped";
@@ -1630,7 +1629,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 			.setDesc("Domains to skip when using built-in scraper (comma-separated)")
 			.addTextArea((text) =>
 				text
-					.setPlaceholder("youtube.com, facebook.com, twitter.com")
+					.setPlaceholder("Domains to skip, comma separated")
 					.setValue(this.plugin.settings.skipDomains)
 					.onChange(async (value) => {
 						this.plugin.settings.skipDomains = value;
@@ -1640,7 +1639,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Skip domains (external API)")
-			.setDesc("Domains to skip when using external API (fewer needed - Jina handles YouTube, Facebook)")
+			.setDesc("Domains to skip when using external API (fewer needed, external API handles most sites)")
 			.addTextArea((text) =>
 				text
 					.setPlaceholder("Leave empty to scrape all")
@@ -1651,8 +1650,8 @@ class LinkScraperSettingTab extends PluginSettingTab {
 					})
 			);
 
-		// General settings
-		new Setting(containerEl).setName("General").setHeading();
+		// Scraping behavior settings
+		new Setting(containerEl).setName("Scraping behavior").setHeading();
 
 		new Setting(containerEl)
 			.setName("Timeout (ms)")
@@ -1684,7 +1683,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Use external scraper")
-			.setDesc("Use external API for better extraction (handles YouTube, Facebook, JavaScript-heavy sites)")
+			.setDesc("Use external API for better content extraction")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.useExternalScraper)
@@ -1696,7 +1695,7 @@ class LinkScraperSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Scraper API URL")
-			.setDesc("API endpoint (default: Jina Reader - free, no key required)")
+			.setDesc("API endpoint (free, no key required)")
 			.addText((text) =>
 				text
 					.setPlaceholder("https://r.jina.ai/")

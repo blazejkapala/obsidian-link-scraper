@@ -1089,10 +1089,10 @@ var ScraperModal = class extends import_obsidian.Modal {
     this.showRunningUI();
     if (this.preloadedUrls && this.preloadedUrls.length > 0 && this.sourceFile) {
       this.statusEl.setText(`Scraping ${this.preloadedUrls.length} links...`);
-      void this.manager.startWithUrls(this.preloadedUrls, this.sourceFile);
+      await this.manager.startWithUrls(this.preloadedUrls, this.sourceFile);
     } else {
       this.statusEl.setText("Scanning...");
-      void this.manager.start(this.folderPath);
+      await this.manager.start(this.folderPath);
     }
   }
   onClose() {
@@ -1117,14 +1117,14 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
     containerEl.empty();
     new import_obsidian.Setting(containerEl).setName("Folder scope").setHeading();
     new import_obsidian.Setting(containerEl).setName("Output folder").setDesc("Folder where scraped content will be saved (also excluded from scanning)").addText((text) => {
-      text.setPlaceholder("scraped-links").setValue(this.plugin.settings.outputFolder).onChange(async (value) => {
+      text.setPlaceholder("Scraped-links").setValue(this.plugin.settings.outputFolder).onChange(async (value) => {
         this.plugin.settings.outputFolder = value || "scraped-links";
         await this.plugin.saveSettings();
       });
       new FolderSuggest(this.app, text.inputEl);
     });
     new import_obsidian.Setting(containerEl).setName("Include folders").setDesc("Only scan these folders (comma-separated, empty = all). Start typing to see suggestions.").addText((text) => {
-      text.setPlaceholder("Notes, Projects, Archive").setValue(this.plugin.settings.includeFolders).onChange(async (value) => {
+      text.setPlaceholder("Notes, projects, archive").setValue(this.plugin.settings.includeFolders).onChange(async (value) => {
         this.plugin.settings.includeFolders = value;
         await this.plugin.saveSettings();
       });
@@ -1132,7 +1132,7 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
       new FolderSuggest(this.app, text.inputEl);
     });
     new import_obsidian.Setting(containerEl).setName("Exclude folders").setDesc("Skip these folders (comma-separated). Output folder is always excluded.").addText((text) => {
-      text.setPlaceholder("Templates, Daily Notes").setValue(this.plugin.settings.excludeFolders).onChange(async (value) => {
+      text.setPlaceholder("Templates, daily notes").setValue(this.plugin.settings.excludeFolders).onChange(async (value) => {
         this.plugin.settings.excludeFolders = value;
         await this.plugin.saveSettings();
       });
@@ -1147,25 +1147,25 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
       })
     );
     new import_obsidian.Setting(containerEl).setName("Backlink text").setDesc("Text displayed for backlink (e.g. 'scraped', '\u{1F4E5}', 'archived')").addText(
-      (text) => text.setPlaceholder("scraped").setValue(this.plugin.settings.backlinkText).onChange(async (value) => {
+      (text) => text.setPlaceholder("Scraped").setValue(this.plugin.settings.backlinkText).onChange(async (value) => {
         this.plugin.settings.backlinkText = value || "scraped";
         await this.plugin.saveSettings();
       })
     );
     new import_obsidian.Setting(containerEl).setName("Domain filtering").setHeading();
     new import_obsidian.Setting(containerEl).setName("Skip domains (local scraper)").setDesc("Domains to skip when using built-in scraper (comma-separated)").addTextArea(
-      (text) => text.setPlaceholder("youtube.com, facebook.com, twitter.com").setValue(this.plugin.settings.skipDomains).onChange(async (value) => {
+      (text) => text.setPlaceholder("Domains to skip, comma separated").setValue(this.plugin.settings.skipDomains).onChange(async (value) => {
         this.plugin.settings.skipDomains = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Skip domains (external API)").setDesc("Domains to skip when using external API (fewer needed - Jina handles YouTube, Facebook)").addTextArea(
+    new import_obsidian.Setting(containerEl).setName("Skip domains (external API)").setDesc("Domains to skip when using external API (fewer needed, external API handles most sites)").addTextArea(
       (text) => text.setPlaceholder("Leave empty to scrape all").setValue(this.plugin.settings.skipDomainsWhenExternal).onChange(async (value) => {
         this.plugin.settings.skipDomainsWhenExternal = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("General").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Scraping behavior").setHeading();
     new import_obsidian.Setting(containerEl).setName("Timeout (ms)").setDesc("Maximum time to wait for response").addText(
       (text) => text.setPlaceholder("20000").setValue(String(this.plugin.settings.timeout)).onChange(async (value) => {
         this.plugin.settings.timeout = parseInt(value) || 2e4;
@@ -1179,13 +1179,13 @@ var LinkScraperSettingTab = class extends import_obsidian.PluginSettingTab {
       })
     );
     new import_obsidian.Setting(containerEl).setName("External scraper API").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Use external scraper").setDesc("Use external API for better extraction (handles YouTube, Facebook, JavaScript-heavy sites)").addToggle(
+    new import_obsidian.Setting(containerEl).setName("Use external scraper").setDesc("Use external API for better content extraction").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.useExternalScraper).onChange(async (value) => {
         this.plugin.settings.useExternalScraper = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Scraper API URL").setDesc("API endpoint (default: Jina Reader - free, no key required)").addText(
+    new import_obsidian.Setting(containerEl).setName("Scraper API URL").setDesc("API endpoint (free, no key required)").addText(
       (text) => text.setPlaceholder("https://r.jina.ai/").setValue(this.plugin.settings.externalScraperUrl).onChange(async (value) => {
         this.plugin.settings.externalScraperUrl = value || "https://r.jina.ai/";
         await this.plugin.saveSettings();
